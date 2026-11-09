@@ -1960,6 +1960,10 @@ int GUIAction::setbootslot(std::string arg)
 			}
 		}
 		PartitionManager.Set_Active_Slot(arg);
+		if (PartitionManager.Get_Active_Slot_Display() != arg) {
+			operation_end(1);
+			return 0;
+		}
 	} else {
 		simulate_progress_bar();
 	}

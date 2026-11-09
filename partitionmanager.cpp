@@ -3305,6 +3305,8 @@ void TWPartitionManager::Set_Active_Slot(const string& Slot) {
 		android::sp<IBootControl> module = IBootControl::getService();
 		if (module == nullptr) {
 			LOGERR("Error getting bootctrl module.\n");
+			gui_msg(Msg(msg::kError, "unable_set_boot_slot=Error changing bootloader boot slot to {1}")(Slot));
+			return;
 		} else {
 			uint32_t slot_number = 0;
 			if (Slot == "B")
@@ -3312,8 +3314,14 @@ void TWPartitionManager::Set_Active_Slot(const string& Slot) {
 			CommandResult result;
 			auto ret = module->setActiveBootSlot(slot_number, [&result]
 					(const CommandResult &cb_result) { result = cb_result; });
-			if (!ret.isOk() || !result.success)
+			if (!ret.isOk() || !result.success) {
+				// keep showing the slot the bootloader will really boot. the
+				// label used to change anyway, which hid a broken boot HAL.
+				LOGINFO("setActiveBootSlot(%u) failed: %s\n", slot_number,
+					ret.isOk() ? result.errMsg.c_str() : ret.description().c_str());
 				gui_msg(Msg(msg::kError, "unable_set_boot_slot=Error changing bootloader boot slot to {1}")(Slot));
+				return;
+			}
 		}
 		DataManager::SetValue("tw_active_slot", Slot); // Doing this outside of this if block may result in a seg fault because the DataManager may not be ready yet
 	}
