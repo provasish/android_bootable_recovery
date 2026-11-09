@@ -414,6 +414,7 @@ public:
 	bool Rebuild_Logical_Group_For_High_Speed_Flash(const std::string& slot_suffix,
 		const std::vector<std::pair<std::string, uint64_t>>& partitions,
 		const std::string& declared_group_name, uint64_t declared_group_size,
+		bool allow_overwrite_booted,
 		std::map<std::string, std::string>* mapped_paths);                    // Lay out and map the target slot's Super group for a high-speed flash
 
 private:

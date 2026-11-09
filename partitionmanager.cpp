@@ -3838,6 +3838,7 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		const std::string& slot_suffix,
 		const std::vector<std::pair<std::string, uint64_t>>& partitions,
 		const std::string& declared_group_name, uint64_t declared_group_size,
+		bool allow_overwrite_booted,
 		std::map<std::string, std::string>* mapped_paths) {
 	if (mapped_paths)
 		mapped_paths->clear();
@@ -3852,9 +3853,17 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	}
 
 	const uint32_t metadata_slot = android::fs_mgr::SlotNumberForSlotSuffix(slot_suffix);
+	const std::string source_suffix = (slot_suffix == "_b") ? "_a" : "_b";
+	const uint32_t source_metadata_slot = android::fs_mgr::SlotNumberForSlotSuffix(source_suffix);
 	const std::string super_device = Get_Super_Partition();
 
-	auto builder = MetadataBuilder::New(super_device, metadata_slot);
+	// Start from the BOOTED slot's copy of the table, like update_engine
+	// (MetadataBuilder::NewForUpdate reads the source slot). Each slot has its
+	// own copy, and the target slot's copy can still describe the booted slot
+	// as it was before the last flash -- laying out from it could place the
+	// new partitions on top of the running system. The result is written to
+	// the target slot's copy only.
+	auto builder = MetadataBuilder::New(super_device, source_metadata_slot);
 	if (!builder) {
 		LOGINFO("Unable to read logical partition metadata from '%s'\n", super_device.c_str());
 		gui_print_color("error", "  ERROR: Super layout: can't read the Super metadata\n");
@@ -3936,17 +3945,69 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 
 	// nothing is written to the device until UpdatePartitionTable below, so
 	// failing here leaves the on-disk metadata untouched
-	for (auto& kv : partitions) {
-		std::string pname = kv.first + slot_suffix;
-		auto* p = builder->AddPartition(pname, group_name, 0 /* LP_PARTITION_ATTR_NONE */);
-		if (!p || !builder->ResizePartition(p, kv.second)) {
-			LOGINFO("Couldn't fit '%s' (%llu bytes) next to the booted slot's partitions\n",
-				pname.c_str(), (unsigned long long)kv.second);
+	std::string failed_name;
+	uint64_t failed_size = 0;
+	auto lay_out = [&]() -> bool {
+		for (auto& kv : partitions) {
+			std::string pname = kv.first + slot_suffix;
+			auto* p = builder->AddPartition(pname, group_name, 0 /* LP_PARTITION_ATTR_NONE */);
+			if (!p || !builder->ResizePartition(p, kv.second)) {
+				failed_name = kv.first;
+				failed_size = kv.second;
+				return false;
+			}
+		}
+		return true;
+	};
+
+	std::vector<std::string> booted_partitions;
+	if (!lay_out()) {
+		LOGINFO("Couldn't fit '%s%s' (%llu bytes) next to the booted slot's partitions\n",
+			failed_name.c_str(), slot_suffix.c_str(), (unsigned long long)failed_size);
+		if (!allow_overwrite_booted) {
 			gui_print_color("error", "  ERROR: Super layout: '%s' (%.2f GiB) doesn't fit next to the current ROM.\n",
-				kv.first.c_str(), (double)kv.second / (1ULL << 30));
-			gui_print_color("error", "  Nothing was written. Flash this ROM with high-speed flash turned off.\n");
+				failed_name.c_str(), (double)failed_size / (1ULL << 30));
+			gui_print_color("error", "  Nothing was written. Turn on 'High-speed: allow overwriting the current slot'\n");
+			gui_print_color("error", "  or flash this ROM with high-speed flash turned off.\n");
 			return false;
 		}
+
+		// opt-in: give up the booted slot's Super partitions, like
+		// update_engine does when it flashes from recovery. still nothing on
+		// the device has changed at this point.
+		builder->RemoveGroupAndPartitions(group_name);
+		for (const std::string& g : builder->ListGroups()) {
+			if (g.size() <= source_suffix.size() ||
+			    g.compare(g.size() - source_suffix.size(), source_suffix.size(), source_suffix) != 0)
+				continue;
+			for (auto* sp : builder->ListPartitionsInGroup(g))
+				booted_partitions.push_back(sp->name());
+			LOGINFO("Dropping the booted slot's group '%s' to make room\n", g.c_str());
+			builder->RemoveGroupAndPartitions(g);
+		}
+		if (booted_partitions.empty() || !builder->AddGroup(group_name, group_max_size) || !lay_out()) {
+			gui_print_color("error", "  ERROR: Super layout: '%s' (%.2f GiB) doesn't fit in group '%s' even without the current ROM.\n",
+				failed_name.c_str(), (double)failed_size / (1ULL << 30), group_name.c_str());
+			gui_print_color("error", "  Nothing was written.\n");
+			return false;
+		}
+
+		// release the booted slot's partitions before their space is reused,
+		// so nothing reads or writes them while the new ROM lands there. if
+		// any of them can't be released, stop -- the table hasn't been
+		// written yet, and a reboot maps them again.
+		for (auto* p : Partitions)
+			if (p->Is_Super)
+				p->UnMount(false);
+		for (const std::string& name : booted_partitions) {
+			if (!DestroyLogicalPartition(name)) {
+				gui_print_color("error", "  ERROR: Super layout: can't release the current slot's '%s'.\n", name.c_str());
+				gui_print_color("error", "  Nothing was written. Reboot recovery and try again.\n");
+				return false;
+			}
+		}
+		gui_print_color("warning", "  Overwriting the current slot's Super partitions (%zu): it won't boot until this flash finishes.\n",
+			booted_partitions.size());
 	}
 
 	auto updated = builder->Export();
