@@ -353,6 +353,7 @@ struct HighSpeedPartitionPlan {
 	uint64_t expanded_size = 0; // decompressed size, straight from the manifest
 	bool is_logical = false;   // true if this one lives in Super (needs the group rebuild)
 	bool is_firmware = false;  // physical, not boot chain
+	bool is_shared = false;    // exists only once on the device, both slot names are aliases of it
 	std::string sha256;        // SHA-256 from the manifest, raw bytes
 };
 
@@ -483,7 +484,7 @@ bool VerifyDeviceSha256(int fd, uint64_t size, const std::string& expected) {
 //
 // Every check here fails closed. The target must be a real block device,
 // and the booted slot's node must be found and must be a different device.
-bool ResolvePhysicalTarget(const HighSpeedPartitionPlan& part, const std::string& booted_suffix,
+bool ResolvePhysicalTarget(HighSpeedPartitionPlan& part, const std::string& booted_suffix,
                            const std::string& target_suffix, std::string* node) {
 	if (part.name.empty() || part.name.find('/') != std::string::npos ||
 	    part.name.find("..") != std::string::npos) {
@@ -523,10 +524,27 @@ bool ResolvePhysicalTarget(const HighSpeedPartitionPlan& part, const std::string
 		return false;
 	}
 	if (booted_real == target_real) {
-		HsWhy("'" + part.name + "' target is the booted slot's partition");
-		return false;
+		// some firmware partitions exist only once (no <name>_a/<name>_b in
+		// bootdevice/by-name); the device tree gives them slot aliases so
+		// update_engine can find them, which is why both names resolve to the
+		// same node here. update_engine writes such a partition once, for both
+		// slots, and so does this -- but only for firmware (which is only in
+		// the plan with the firmware option on), and only when the single
+		// partition really is that node.
+		std::string single_real, unused;
+		const std::string bootdev = "/dev/block/bootdevice/by-name/";
+		const bool shared = part.is_firmware &&
+			ResolveBlockNode(bootdev + part.name, &single_real) && single_real == target_real &&
+			!ResolveBlockNode(bootdev + part.name + "_a", &unused) &&
+			!ResolveBlockNode(bootdev + part.name + "_b", &unused);
+		if (!shared) {
+			HsWhy("'" + part.name + "' target is the booted slot's partition");
+			return false;
+		}
+		part.is_shared = true;
 	}
-	if (part.is_firmware && !VerifyFirmwareNode(target_real, part.name + target_suffix)) {
+	if (part.is_firmware && !VerifyFirmwareNode(target_real,
+			part.is_shared ? part.name : part.name + target_suffix)) {
 		return false;
 	}
 	*node = target_real;
@@ -777,9 +795,18 @@ bool ProbeHighSpeedPayload(const std::string& package_path, ZipArchiveHandle zip
 
 enum class HighSpeedResult {
 	kNotApplicable,  // the toggle was off, or this isn't an A/B payload zip -- run the normal path
+	kUnsupported,    // high-speed can't take this zip and NOTHING was touched -- run the normal path
 	kAborted,        // toggle was on and something went wrong -- stop, don't fall back
 	kSucceeded,
 };
+
+// for stops that happen before anything on the device was changed, where
+// the normal update_engine install can safely take over
+static HighSpeedResult HsUnsupported(const std::string& why) {
+	gui_print_color("warning", "  High-speed flash can't take this zip: %s\n", why.c_str());
+	gui_print_color("warning", "  Nothing was written. Continuing with the normal install.\n");
+	return HighSpeedResult::kUnsupported;
+}
 
 static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArchiveHandle zip) {
 	if (!DataManager::GetIntValue("tw_high_speed_flash"))
@@ -789,13 +816,13 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	if (FindEntry(zip, "payload_properties.txt", &unused) != 0)
 		return HighSpeedResult::kNotApplicable;
 
-	// from here on the toggle is on and this really is an A/B payload zip,
-	// so every way out below is kAborted -- we never quietly drop back to
-	// the normal path once we've gotten this far
-	if (access(kHighSpeedExtractorPath, X_OK) != 0) {
-		HsFail("extractor missing (/system/bin/otaripper)");
-		return HighSpeedResult::kAborted;
-	}
+	// from here on the toggle is on and this really is an A/B payload zip.
+	// until the pre-flight below is through, nothing on the device has been
+	// touched, so "this zip/target isn't supported" hands over to the normal
+	// install (kUnsupported). every later way out is kAborted -- once
+	// something may have been changed we never drop back to the normal path.
+	if (access(kHighSpeedExtractorPath, X_OK) != 0)
+		return HsUnsupported("extractor missing (/system/bin/otaripper)");
 
 	HsSay("High-speed flash");
 	HsSay("  Reading payload...");
@@ -803,10 +830,8 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	HighSpeedGroupSpec group_spec;
 	std::vector<std::string> skipped_firmware;
 	const bool include_firmware = DataManager::GetIntValue("tw_high_speed_firmware") != 0;
-	if (!ProbeHighSpeedPayload(package, zip, include_firmware, &plan, &group_spec, &skipped_firmware)) {
-		HsFail("package not supported: " + g_hs_reason);
-		return HighSpeedResult::kAborted;
-	}
+	if (!ProbeHighSpeedPayload(package, zip, include_firmware, &plan, &group_spec, &skipped_firmware))
+		return HsUnsupported(g_hs_reason);
 
 	{
 		uint64_t total = 0;
@@ -858,10 +883,8 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 		if (part.is_logical)
 			continue;
 		std::string node;
-		if (!ResolvePhysicalTarget(part, booted_suffix, target_suffix, &node)) {
-			HsFail(g_hs_reason);
-			return HighSpeedResult::kAborted;
-		}
+		if (!ResolvePhysicalTarget(part, booted_suffix, target_suffix, &node))
+			return HsUnsupported(g_hs_reason);
 		uint64_t node_size = 0;
 		if (!GetBlockDeviceSize(node, &node_size)) {
 			HsFail("can't read the size of the '" + part.name + "' target");
@@ -967,6 +990,9 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 		target_fds.push_back(std::move(fd));
 	}
 
+	for (const auto& part : plan)
+		if (part.is_shared)
+			HsSay("  '" + part.name + "' exists only once on this device and is shared by both slots");
 	HsSay("  Writing " + std::to_string(plan.size()) + " images...");
 
 	time_t extract_start, extract_stop;
