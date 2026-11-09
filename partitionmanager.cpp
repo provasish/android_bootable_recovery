@@ -3882,11 +3882,22 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 			break;
 		}
 	}
-	if (group_name.empty() && !declared_group_name.empty() &&
-	    builder->FindGroup(declared_group_name + slot_suffix)) {
-		group_name = declared_group_name + slot_suffix;
-		LOGINFO("No existing partitions for slot '%s', using declared group '%s'\n",
-			slot_suffix.c_str(), group_name.c_str());
+	bool create_group = false;
+	if (group_name.empty() && !declared_group_name.empty()) {
+		if (builder->FindGroup(declared_group_name + slot_suffix)) {
+			group_name = declared_group_name + slot_suffix;
+			LOGINFO("No existing partitions for slot '%s', using declared group '%s'\n",
+				slot_suffix.c_str(), group_name.c_str());
+		} else if (declared_group_size > 0 && builder->FindGroup(declared_group_name + source_suffix)) {
+			// a recovery flash of the other slot can drop this slot's group
+			// entirely to make room. the booted slot's group uses the same
+			// name with its own suffix, which confirms the naming scheme, so
+			// create this slot's group from the payload, like update_engine
+			group_name = declared_group_name + slot_suffix;
+			create_group = true;
+			LOGINFO("Slot '%s' has no group in the booted slot's table, creating '%s' (%llu bytes) from the payload\n",
+				slot_suffix.c_str(), group_name.c_str(), (unsigned long long)declared_group_size);
+		}
 	}
 	if (group_name.empty()) {
 		LOGINFO("Couldn't find which group these partitions belong to\n");
@@ -3894,13 +3905,16 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		return false;
 	}
 
-	auto* group = builder->FindGroup(group_name);
-	if (!group) {
-		LOGINFO("Group '%s' not found in metadata\n", group_name.c_str());
-		gui_print_color("error", "  ERROR: Super layout: group not found in the Super metadata\n");
-		return false;
+	uint64_t group_max_size = declared_group_size;
+	if (!create_group) {
+		auto* group = builder->FindGroup(group_name);
+		if (!group) {
+			LOGINFO("Group '%s' not found in metadata\n", group_name.c_str());
+			gui_print_color("error", "  ERROR: Super layout: group not found in the Super metadata\n");
+			return false;
+		}
+		group_max_size = group->maximum_size();
 	}
-	uint64_t group_max_size = group->maximum_size();
 
 	// everything above is read-only; nothing has been touched yet
 	if (!declared_group_name.empty() && declared_group_size > 0) {
