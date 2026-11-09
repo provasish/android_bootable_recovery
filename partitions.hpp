@@ -410,6 +410,11 @@ public:
 	void Unlock_Block_Partitions();                                           // Unlock all block devices after update_engine runs
 	bool Unmap_Super_Devices();                                               // Unmap super devices in TWRP
 	bool Check_Pending_Merges();                                              // Check and run pending merges on data for VAB devices
+	bool Cancel_Pending_Ota_For_High_Speed_Flash();                         // Cancel a leftover virtual A/B update before a high-speed flash; refuses during a merge
+	bool Rebuild_Logical_Group_For_High_Speed_Flash(const std::string& slot_suffix,
+		const std::vector<std::pair<std::string, uint64_t>>& partitions,
+		const std::string& declared_group_name, uint64_t declared_group_size,
+		std::map<std::string, std::string>* mapped_paths);                    // Lay out and map the target slot's Super group for a high-speed flash
 
 private:
 	void Setup_Settings_Storage_Partition(TWPartition* Part);                 // Sets up settings storage
