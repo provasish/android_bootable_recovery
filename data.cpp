@@ -582,9 +582,11 @@ void DataManager::SetDefaultValues()
 	mConst.SetValue(TW_VERSION_VAR, TW_VERSION_STR);
 
 #ifndef TW_NO_HAPTICS
-	mPersist.SetValue("tw_button_vibrate", "80");
-	mPersist.SetValue("tw_keyboard_vibrate", "40");
-	mPersist.SetValue("tw_action_vibrate", "160");
+	// Short, light ticks: the aw8697 haptic motor buzzes noticeably at TWRP's
+	// stock 80/40/160 ms.
+	mPersist.SetValue("tw_button_vibrate", "15");
+	mPersist.SetValue("tw_keyboard_vibrate", "15");
+	mPersist.SetValue("tw_action_vibrate", "15");
 	mConst.SetValue("tw_disable_haptics", "0");
 #else
 	LOGINFO("TW_NO_HAPTICS := true\n");
