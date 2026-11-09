@@ -432,6 +432,10 @@
 					<condition var1="tw_high_speed_flash" var2="1"/>
 					<data variable="tw_high_speed_firmware"/>
 				</listitem>
+				<listitem name="{@high_speed_overwrite_chk=High-speed: allow overwriting the current slot}">
+					<condition var1="tw_high_speed_flash" var2="1"/>
+					<data variable="tw_high_speed_overwrite"/>
+				</listitem>
 				<listitem name="{@install_reboot_chk=Reboot after installation is complete}">
 					<data variable="tw_install_reboot"/>
 				</listitem>

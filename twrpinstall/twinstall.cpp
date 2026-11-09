@@ -910,7 +910,8 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 		if (!logical_sizes.empty())
 			HsSay("  Super layout for slot " + target_slot + "...");
 		if (!PartitionManager.Rebuild_Logical_Group_For_High_Speed_Flash(target_suffix, logical_sizes,
-			group_spec.name, group_spec.size, &mapped_paths)) {
+			group_spec.name, group_spec.size,
+			DataManager::GetIntValue("tw_high_speed_overwrite") != 0, &mapped_paths)) {
 			return HighSpeedResult::kAborted;
 		}
 	}
