@@ -773,6 +773,12 @@ void DataManager::SetDefaultValues()
 #endif
 
 	mData.SetValue(TW_ACTION_BUSY, "0");
+
+	// high-speed flash: off by default and not persisted, so it has to be
+	// turned on again for each recovery session
+	mData.SetValue("tw_high_speed_flash", "0");
+	mData.SetValue("tw_high_speed_readback", "1"); // re-read every written image from storage
+	mData.SetValue("tw_high_speed_firmware", "0"); // also write firmware partitions
 	mData.SetValue("tw_wipe_cache", "0");
 	mData.SetValue("tw_wipe_dalvik", "0");
 	mData.SetValue(TW_ZIP_INDEX, "0");
