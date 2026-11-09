@@ -659,13 +659,22 @@ bool ProbeHighSpeedPayload(const std::string& package_path, ZipArchiveHandle zip
 		return false;
 	}
 
-	if (manifest.minor_version() != 0) {
-		// a nonzero minor version means this is a delta payload, which
-		// references an old partition we don't have lying around in the
-		// shape this path expects -- full payloads only here
-		HsWhy("incremental (delta) package, a full OTA is needed");
-		return false;
+	// full payloads only. minor_version can't tell: realme (and other OEMs)
+	// build full OTAs with a nonzero minor version, which is why
+	// update_engine logs "Detected a 'delta' payload" for them. what makes a
+	// package incremental is a partition that is patched from its old
+	// contents, which the payload records as old_partition_info. the
+	// operation allow-list below additionally rejects anything that reads
+	// source data.
+	for (const auto& part : manifest.partitions()) {
+		if (part.has_old_partition_info() && part.old_partition_info().size() > 0) {
+			HsWhy("incremental (delta) package ('" + part.partition_name() +
+				"' is patched from its old contents), a full OTA is needed");
+			return false;
+		}
 	}
+	LOGINFO("high-speed probe: payload minor_version %u, no partition depends on old contents\n",
+		(unsigned)manifest.minor_version());
 
 	// the payload itself says which partitions live in Super (any group's
 	// partition_names). that's authoritative, so ROM-specific logical
