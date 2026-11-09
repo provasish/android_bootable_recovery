@@ -4052,11 +4052,13 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		}
 		if (mapped_paths)
 			(*mapped_paths)[kv.first] = mapped_path;
+		// point TWRP's entry at the new device, but don't measure it: the
+		// partition is still empty, and Update_Size() would try to mount it
+		// ("Failed to mount ... Invalid argument"). sizes are refreshed once
+		// the flash is done.
 		TWPartition* twp = Find_Partition_By_Path("/" + kv.first);
-		if (twp) {
+		if (twp)
 			twp->Set_Block_Device(mapped_path);
-			twp->Update_Size(true);
-		}
 	}
 
 	LOGINFO("rebuilt logical group '%s' for %zu partitions, total %llu of %llu bytes\n",
