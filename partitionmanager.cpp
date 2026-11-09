@@ -4061,6 +4061,27 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 			twp->Set_Block_Device(mapped_path);
 	}
 
+	// the booted slot's partitions were unmapped above. TWRP entries for the
+	// ones the new ROM doesn't have (e.g. stock's my_* when going to AOSP)
+	// still point at those removed dm devices, so the size refresh after the
+	// slot switch would try to mount them ("Failed to mount '/my_product'").
+	// clear them; the entries come back with their real devices once
+	// recovery reboots.
+	if (!booted_partitions.empty()) {
+		for (auto* p : Partitions) {
+			if (!p->Is_Super)
+				continue;
+			const std::string bare = Get_Bare_Partition_Name(p->Get_Mount_Point());
+			bool in_new_rom = false;
+			for (auto& kv : partitions)
+				in_new_rom = in_new_rom || kv.first == bare;
+			if (!in_new_rom) {
+				LOGINFO("'%s' is not part of the new ROM, detaching its TWRP entry\n", bare.c_str());
+				p->Set_Block_Device("");
+			}
+		}
+	}
+
 	LOGINFO("rebuilt logical group '%s' for %zu partitions, total %llu of %llu bytes\n",
 		group_name.c_str(), partitions.size(),
 		(unsigned long long)total_requested, (unsigned long long)group_max_size);
