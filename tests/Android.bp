@@ -21,6 +21,14 @@ package {
     default_applicable_licenses: ["bootable_recovery_license"],
 }
 
+cc_test_host {
+    name: "twrp_ota_device_check_test",
+    srcs: ["ota_device_check_test.cpp"],
+    include_dirs: ["bootable/recovery/twrpinstall/include"],
+    gtest: false,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
 cc_defaults {
     name: "recovery_test_defaults",
 

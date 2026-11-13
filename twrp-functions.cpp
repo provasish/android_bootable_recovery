@@ -42,6 +42,7 @@
 #include <thread>
 
 #include <android-base/strings.h>
+#include <android-base/properties.h>
 #include <android-base/chrono_utils.h>
 
 #include "twrp-functions.hpp"
@@ -74,6 +75,14 @@ extern "C" {
 #endif
 
 struct selabel_handle *selinux_handle;
+
+string TWFunc::Get_OTA_Assert_Devices() {
+#ifdef TARGET_OTA_ASSERT_DEVICE
+	return TARGET_OTA_ASSERT_DEVICE;
+#else
+	return android::base::GetProperty("ro.product.device", "");
+#endif
+}
 
 /* Execute a command */
 int TWFunc::Exec_Cmd(const string& cmd, string &result, bool combine_stderr) {

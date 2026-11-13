@@ -56,6 +56,7 @@ enum Archive_Type {
 class TWFunc
 {
 public:
+	static string Get_OTA_Assert_Devices();                                    // Board aliases, independent of the installed ROM
 	static string Get_Root_Path(const string& Path);                            // Trims any trailing folders or filenames from the path, also adds a leading / if not present
 	static string Get_Path(const string& Path);                                 // Trims everything after the last / in the string
 	static string Get_Filename(const string& Path);                             // Trims the path off of a filename
