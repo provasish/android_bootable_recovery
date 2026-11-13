@@ -731,6 +731,10 @@
 		<string name="copy_logcat">Copied logcat to {1}</string>
 		<string name="include_kernel_log">Include Kernel Log</string>
 		<string name="include_logcat">Include Logcat</string>
+		<string name="include_diagnostics">Include Device Diagnostics</string>
+		<string name="diagnostics_saved">Diagnostics saved in a twrp-diagnostics folder under {1}</string>
+		<string name="diagnostics_failed">Unable to export diagnostics. Recovery log was saved.</string>
+		<string name="copy_log_failed">Unable to copy recovery log.</string>
 		<string name="sha2_chk">Use SHA2 for hashing</string>
 		<string name="unable_set_boot_slot">Error changing bootloader boot slot to {1}</string>
 		<string name="unmount_sys_install">Unmount System before installing a ZIP</string>
