@@ -59,6 +59,7 @@
 #include <ziparchive/zip_archive.h>
 #include "twinstall/install.h"
 #include "twinstall/verifier.h"
+#include "twinstall/ota_device_check.h"
 #include "variables.h"
 #include "data.hpp"
 #include "partitions.hpp"
@@ -815,6 +816,27 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	ZipEntry64 unused;
 	if (FindEntry(zip, "payload_properties.txt", &unused) != 0)
 		return HighSpeedResult::kNotApplicable;
+
+	// A payload's partition names do not identify its device. This rejection
+	// must never fall back to update_engine, even though nothing was written.
+	ZipEntry64 metadata_entry;
+	if (FindEntry(zip, "META-INF/com/android/metadata", &metadata_entry) != 0 ||
+	    metadata_entry.uncompressed_length == 0 ||
+	    metadata_entry.uncompressed_length > 64 * 1024) {
+		HsFail("missing or oversized OTA device metadata; nothing was written");
+		return HighSpeedResult::kAborted;
+	}
+	std::string metadata(metadata_entry.uncompressed_length, '\0');
+	if (ExtractToMemory(zip, &metadata_entry, reinterpret_cast<uint8_t*>(&metadata[0]),
+	                    metadata.size()) != 0) {
+		HsFail("can't read OTA device metadata; nothing was written");
+		return HighSpeedResult::kAborted;
+	}
+	std::string device_reason;
+	if (!twrp::CheckOtaDevice(metadata, TWFunc::Get_OTA_Assert_Devices(), &device_reason)) {
+		HsFail(device_reason + "; nothing was written");
+		return HighSpeedResult::kAborted;
+	}
 
 	// from here on the toggle is on and this really is an A/B payload zip.
 	// until the pre-flight below is through, nothing on the device has been
