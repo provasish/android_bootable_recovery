@@ -690,15 +690,39 @@ int GUIAction::copylog(std::string arg __unused)
 
 		DataManager::GetValue("tw_include_kernel_log", copy_kernel_log);
 		DataManager::GetValue("tw_include_logcat", copy_logcat);
-		PartitionManager.Mount_Current_Storage(true);
+		if (!PartitionManager.Mount_Current_Storage(true)) {
+			operation_end(1);
+			return 1;
+		}
 		curr_storage = DataManager::GetCurrentStoragePath();
 		dst = curr_storage + "/recovery.log";
-		TWFunc::copy_file("/tmp/recovery.log", dst.c_str(), 0755);
+		if (TWFunc::copy_file("/tmp/recovery.log", dst.c_str(), 0600) != 0) {
+			gui_err("copy_log_failed=Unable to copy recovery log.");
+			operation_end(1);
+			return 1;
+		}
 		tw_set_default_metadata(dst.c_str());
 		if (copy_kernel_log)
 			TWFunc::copy_kernel_log(curr_storage);
 		if (copy_logcat)
 			TWFunc::copy_logcat(curr_storage);
+		if (DataManager::GetIntValue("tw_include_diagnostics")) {
+			// Pass the destination as an argument, not as shell command text.
+			// Spaces, quotes and shell metacharacters in storage paths are safe.
+			pid_t pid = fork();
+			if (pid == 0) {
+				execl("/system/bin/sh", "sh", "/system/bin/recovery-diagnostics.sh",
+				      curr_storage.c_str(), static_cast<char*>(nullptr));
+				_exit(127);
+			}
+			int status = 0;
+			if (pid < 0 || TWFunc::Wait_For_Child(pid, &status, "recovery diagnostics") != 0) {
+				gui_err("diagnostics_failed=Unable to export diagnostics. Recovery log was saved.");
+				operation_end(1);
+				return 1;
+			}
+			gui_msg(Msg("diagnostics_saved=Diagnostics saved in a twrp-diagnostics folder under {1}")(curr_storage));
+		}
 		sync();
 		gui_msg(Msg("copy_log=Copied recovery log to {1}")(dst));
 	} else

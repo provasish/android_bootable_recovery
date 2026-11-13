@@ -983,6 +983,8 @@ void DataManager::SetDefaultValues()
 
 	mData.SetValue("tw_enable_adb_backup", "0");
 
+	mConst.SetValue("tw_diagnostics_available", TWFunc::Path_Exists("/system/bin/recovery-diagnostics.sh") ? "1" : "0");
+	mData.SetValue("tw_include_diagnostics", 0);
 	if (TWFunc::Path_Exists("/system/bin/logcat"))
 		mConst.SetValue("tw_logcat_exists", "1");
 	else
