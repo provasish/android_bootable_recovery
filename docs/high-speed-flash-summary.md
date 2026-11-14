@@ -7,6 +7,10 @@ Install a local full A/B ROM ZIP with High-speed flash enabled:
 3. Read the scrollable summary. Use **Back to Options** to make changes.
 4. **Swipe to Install** appears only after a successful review.
 
+The device check accepts both standard pipe-separated and OEM comma-separated
+`pre-device` lists. Aliases are trimmed and compared as complete, case-sensitive
+tokens; a similar prefix or substring is not a match.
+
 The summary shows the recovery's booted slot, the bootloader's active slot,
 the actual target slot, sector-aligned logical image requirements, usable
 Super capacity, available space after reclaiming the old target group, and

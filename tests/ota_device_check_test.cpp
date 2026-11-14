@@ -27,7 +27,16 @@ int main() {
 	Check("ota-type=AB\npre-device=other\n", false);
 	Check("ota-type=AB\npre-device=RMX3371_evil\n", false);
 	Check("ota-type=AB\npre-device=rmx3371\n", false);
-	Check("ota-type=AB\npre-device=RMX3371,other\n", false);
+	Check("ota-type=AB\npre-device=RMX3371,other\n", true);
+	Check("ota-type=AB\npre-device=RMX3371,RE54E4L1,spartan\n", true);
+	Check("ota-type=AB\npre-device=other,spartan\n", true);
+	Check("ota-type=AB\npre-device=other| RE54E4L1 ,another\n", true);
+	Check("ota-type=AB\r\npre-device= other , RMX3371 \r\n", true);
+	Check("ota-type=AB\npre-device=other,another\n", false);
+	Check("ota-type=AB\npre-device=RMX3371_evil,other\n", false);
+	Check("ota-type=AB\npre-device=other|spartan_evil,another\n", false);
+	Check("ota-type=AB\npre-device=rmx3371,other\n", false);
+	Check("ota-type=AB\npre-device=,,,||,\n", false);
 	Check("ota-type=AB\n", false);
 	Check("ota-type=AB\npre-device=\n", false);
 	Check("pre-device=spartan\n", false);

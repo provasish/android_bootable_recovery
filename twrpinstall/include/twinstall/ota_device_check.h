@@ -15,8 +15,9 @@ inline std::string TrimOtaValue(const std::string& value) {
 }
 
 // Match complete aliases, never a substring or a value supplied by the ROM
-// currently installed on /system. Android OTA pre-device uses '|'; the board's
-// TARGET_OTA_ASSERT_DEVICE uses ','. Keep this independent of Android for tests.
+// currently installed on /system. Standard OTA pre-device lists use '|'; some
+// packages use ',' like TARGET_OTA_ASSERT_DEVICE. Accept either separator while
+// still matching complete aliases. Keep this independent of Android for tests.
 inline bool CheckOtaDevice(const std::string& metadata, const std::string& aliases,
                            std::string* reason) {
 	std::set<std::string> allowed;
@@ -68,7 +69,11 @@ inline bool CheckOtaDevice(const std::string& metadata, const std::string& alias
 		*reason = "OTA metadata has no pre-device";
 		return false;
 	}
-	std::istringstream device_stream(devices);
+	std::string device_list = devices;
+	for (char& separator : device_list)
+		if (separator == ',')
+			separator = '|';
+	std::istringstream device_stream(device_list);
 	while (std::getline(device_stream, token, '|')) {
 		if (allowed.count(TrimOtaValue(token))) {
 			reason->clear();
