@@ -508,7 +508,16 @@
 				</actions>
 			</button>
 
+
+			<button style="main_button_half_width">
+				<condition var1="tw_high_speed_flash" var2="1"/>
+				<placement x="%col2_x_left%" y="%row17a_y%"/>
+				<text>{@hs_review_btn=Review Flash}</text>
+				<action function="reviewhighspeedflash"/>
+			</button>
+
 			<slider>
+				<condition var1="tw_high_speed_flash" op="!=" var2="1"/>
 				<text>{@swipe_flash=Swipe to confirm Flash}</text>
 				<action function="flash">flash_zip</action>
 			</slider>
@@ -522,6 +531,47 @@
 			</action>
 
 			<action>
+				<touch key="home"/>
+				<action function="page">main</action>
+			</action>
+		</page>
+
+		<page name="flash_review">
+			<template name="page"/>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>{@hs_review_hdr=Review Flash}</text>
+			</text>
+
+			<textbox style="console">
+				<placement x="%col1_x_left%" y="%row2_y%" w="%content_width%" h="%console_height%"/>
+				<text>%tw_hs_review_text%</text>
+			</textbox>
+
+			<button style="main_button_half_width">
+				<condition var1="tw_busy" var2="0"/>
+				<placement x="%col1_x_left%" y="%row17a_y%"/>
+				<text>{@hs_review_back=Back to Options}</text>
+				<action function="page">flash_confirm</action>
+			</button>
+
+			<slider>
+				<conditions>
+					<condition var1="tw_hs_review_ready" var2="1"/>
+					<condition var1="tw_busy" var2="0"/>
+				</conditions>
+				<text>{@hs_review_swipe=Swipe to Install}</text>
+				<action function="flash">flash_reviewed</action>
+			</slider>
+
+			<action>
+				<condition var1="tw_busy" var2="0"/>
+				<touch key="back"/>
+				<action function="page">flash_confirm</action>
+			</action>
+			<action>
+				<condition var1="tw_busy" var2="0"/>
 				<touch key="home"/>
 				<action function="page">main</action>
 			</action>

@@ -29,6 +29,14 @@ cc_test_host {
     cflags: ["-Wall", "-Wextra", "-Werror"],
 }
 
+cc_test_host {
+    name: "twrp_flash_review_test",
+    srcs: ["flash_review_test.cpp"],
+    include_dirs: ["bootable/recovery", "bootable/recovery/twrpinstall/include"],
+    gtest: false,
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
 cc_defaults {
     name: "recovery_test_defaults",
 

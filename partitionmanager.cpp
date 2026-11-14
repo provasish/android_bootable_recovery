@@ -57,6 +57,7 @@
 #include <liblp/liblp.h>
 #include <libgsi/libgsi.h>
 #include <liblp/builder.h>
+#include <openssl/sha.h>
 #include <libsnapshot/snapshot.h>
 
 #include "variables.h"
@@ -3829,12 +3830,11 @@ bool TWPartitionManager::Cancel_Pending_Ota_For_High_Speed_Flash() {
 	return true;
 }
 
-// Lays out the TARGET slot's dynamic-partition group so every logical
-// partition in the payload exists at its final size, then maps them. Only
-// the target slot's group is rewritten; the booted slot's partitions are
-// left alone. If the new ROM doesn't fit next to them, this stops (the
-// original gave up the booted slot's partitions instead) -- the normal
-// update_engine install can still be used for such a ROM.
+// Plan the target slot's dynamic group using the booted slot's metadata.
+// preview_only returns after in-memory allocation and export validation;
+// it never unmounts, changes mappings or writes metadata. Installation uses
+// that same planner, then commits/maps the result. Reusing the booted ROM's
+// extents requires allow_overwrite_booted and is reported in space_info.
 //
 // declared_group_name / declared_group_size come from the payload's own
 // manifest (DynamicPartitionMetadata.groups): the name is unsuffixed, the
@@ -3847,18 +3847,33 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		const std::vector<std::pair<std::string, uint64_t>>& partitions,
 		const std::string& declared_group_name, uint64_t declared_group_size,
 		bool allow_overwrite_booted,
-		std::map<std::string, std::string>* mapped_paths) {
+		std::map<std::string, std::string>* mapped_paths,
+		bool preview_only, twrp::FlashSpaceInfo* space_info) {
+	twrp::FlashSpaceInfo local_info;
+	if (!space_info)
+		space_info = &local_info;
+	*space_info = twrp::FlashSpaceInfo{};
 	if (mapped_paths)
 		mapped_paths->clear();
-	if (partitions.empty())
-		return true;
+	if (preview_only && android::base::GetBoolProperty("ro.virtual_ab.enabled", false) &&
+	    !Is_Mounted_By_Path("/metadata")) {
+		space_info->error = "Mount Metadata from the Mount menu before reviewing the Android update state";
+		return false;
+	}
 
 	auto snapshots = android::snapshot::SnapshotManager::NewForFirstStageMount();
+	if (preview_only && !snapshots && android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
+		space_info->error = "Cannot read Android snapshot state";
+		return false;
+	}
 	if (snapshots && snapshots->GetUpdateState() != android::snapshot::UpdateState::None) {
+		space_info->error = "An Android snapshot update is active. Finish the update in Android before reviewing this flash";
 		LOGINFO("Refusing to rebuild the logical group while a snapshot update is active\n");
 		gui_print_color("error", "  ERROR: Super layout: an Android snapshot update is active\n");
 		return false;
 	}
+	if (partitions.empty())
+		return true;
 
 	const uint32_t metadata_slot = android::fs_mgr::SlotNumberForSlotSuffix(slot_suffix);
 	const std::string source_suffix = (slot_suffix == "_b") ? "_a" : "_b";
@@ -3943,93 +3958,32 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 			group_name.c_str(), (unsigned long long)group_max_size);
 	}
 
-	uint64_t total_requested = 0;
-	for (auto& kv : partitions)
-		total_requested += kv.second;
-	if (total_requested > group_max_size) {
-		LOGINFO("This ROM needs %llu bytes but the group only allows %llu\n",
-			(unsigned long long)total_requested, (unsigned long long)group_max_size);
-		gui_print_color("error", "  ERROR: Super layout: this ROM is too big for the Super group on this device\n");
+	// Bind the review to the source table, including extents and physical
+	// device geometry, before changing the in-memory builder.
+	auto original = builder->Export();
+	if (!original) {
+		space_info->error = "Cannot export the current Super layout";
 		return false;
 	}
-
-	// release any of these that happen to be mapped right now -- can't
-	// touch their metadata while they're mapped
-	for (auto& kv : partitions)
-		DestroyLogicalPartition(kv.first + slot_suffix);
-
-	builder->RemoveGroupAndPartitions(group_name);
-	if (!builder->AddGroup(group_name, group_max_size)) {
-		LOGINFO("Unable to re-add group '%s'\n", group_name.c_str());
-		gui_print_color("error", "  ERROR: Super layout: can't rebuild the group\n");
-		return false;
-	}
-
-	// nothing is written to the device until UpdatePartitionTable below, so
-	// failing here leaves the on-disk metadata untouched
-	std::string failed_name;
-	uint64_t failed_size = 0;
-	auto lay_out = [&]() -> bool {
-		for (auto& kv : partitions) {
-			std::string pname = kv.first + slot_suffix;
-			auto* p = builder->AddPartition(pname, group_name, 0 /* LP_PARTITION_ATTR_NONE */);
-			if (!p || !builder->ResizePartition(p, kv.second)) {
-				failed_name = kv.first;
-				failed_size = kv.second;
-				return false;
-			}
-		}
-		return true;
+	SHA256_CTX digest;
+	SHA256_Init(&digest);
+	SHA256_Update(&digest, &original->geometry, sizeof(original->geometry));
+	auto hash_table = [&](const auto& table) {
+		if (!table.empty())
+			SHA256_Update(&digest, table.data(), table.size() * sizeof(table.front()));
 	};
+	hash_table(original->partitions);
+	hash_table(original->extents);
+	hash_table(original->groups);
+	hash_table(original->block_devices);
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_Final(hash, &digest);
+	space_info->metadata_id.assign(reinterpret_cast<const char*>(hash), sizeof(hash));
 
-	std::vector<std::string> booted_partitions;
-	if (!lay_out()) {
-		LOGINFO("Couldn't fit '%s%s' (%llu bytes) next to the booted slot's partitions\n",
-			failed_name.c_str(), slot_suffix.c_str(), (unsigned long long)failed_size);
-		if (!allow_overwrite_booted) {
-			gui_print_color("error", "  ERROR: Super layout: '%s' (%.2f GiB) doesn't fit next to the current ROM.\n",
-				failed_name.c_str(), (double)failed_size / (1ULL << 30));
-			gui_print_color("error", "  Nothing was written. Turn on 'High-speed: allow overwriting the current slot'\n");
-			gui_print_color("error", "  or flash this ROM with high-speed flash turned off.\n");
-			return false;
-		}
-
-		// opt-in: give up the booted slot's Super partitions, like
-		// update_engine does when it flashes from recovery. still nothing on
-		// the device has changed at this point.
-		builder->RemoveGroupAndPartitions(group_name);
-		for (const std::string& g : builder->ListGroups()) {
-			if (g.size() <= source_suffix.size() ||
-			    g.compare(g.size() - source_suffix.size(), source_suffix.size(), source_suffix) != 0)
-				continue;
-			for (auto* sp : builder->ListPartitionsInGroup(g))
-				booted_partitions.push_back(sp->name());
-			LOGINFO("Dropping the booted slot's group '%s' to make room\n", g.c_str());
-			builder->RemoveGroupAndPartitions(g);
-		}
-		if (booted_partitions.empty() || !builder->AddGroup(group_name, group_max_size) || !lay_out()) {
-			gui_print_color("error", "  ERROR: Super layout: '%s' (%.2f GiB) doesn't fit in group '%s' even without the current ROM.\n",
-				failed_name.c_str(), (double)failed_size / (1ULL << 30), group_name.c_str());
-			gui_print_color("error", "  Nothing was written.\n");
-			return false;
-		}
-
-		// release the booted slot's partitions before their space is reused,
-		// so nothing reads or writes them while the new ROM lands there. if
-		// any of them can't be released, stop -- the table hasn't been
-		// written yet, and a reboot maps them again.
-		for (auto* p : Partitions)
-			if (p->Is_Super)
-				p->UnMount(false);
-		for (const std::string& name : booted_partitions) {
-			if (!DestroyLogicalPartition(name)) {
-				gui_print_color("error", "  ERROR: Super layout: can't release the current slot's '%s'.\n", name.c_str());
-				gui_print_color("error", "  Nothing was written. Reboot recovery and try again.\n");
-				return false;
-			}
-		}
-		gui_print_color("warning", "  Overwriting the current slot's Super partitions (%zu): it won't boot until this flash finishes.\n",
-			booted_partitions.size());
+	if (!twrp::PlanFlashLayout(builder.get(), group_name, slot_suffix, source_suffix,
+	                          group_max_size, partitions, allow_overwrite_booted, space_info)) {
+		gui_print_color("error", "  ERROR: Super layout: %s. Nothing was written.\n", space_info->error.c_str());
+		return false;
 	}
 
 	auto updated = builder->Export();
@@ -4037,6 +3991,25 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		gui_print_color("error", "  ERROR: Super layout: can't prepare the rebuilt metadata\n");
 		return false;
 	}
+	if (preview_only)
+		return true;
+
+	// The same in-memory plan passed. Only now release mappings and write it.
+	for (const auto& kv : partitions)
+		DestroyLogicalPartition(kv.first + slot_suffix);
+	if (space_info->reuses_booted) {
+		for (auto* p : Partitions)
+			if (p->Is_Super)
+				p->UnMount(false);
+		for (const auto& name : space_info->booted_partitions) {
+			if (!DestroyLogicalPartition(name)) {
+				gui_print_color("error", "  ERROR: Super layout: can't release the current slot's '%s'.\n", name.c_str());
+				return false;
+			}
+		}
+		gui_print_color("warning", "  Reusing the current ROM's Super space; it will not boot until installation succeeds.\n");
+	}
+
 	if (!android::fs_mgr::UpdatePartitionTable(super_device, *updated, metadata_slot)) {
 		LOGINFO("Failed to commit the rebuilt Super partition table\n");
 		gui_print_color("error", "  ERROR: Super layout: can't write the rebuilt metadata\n");
@@ -4075,7 +4048,7 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	// slot switch would try to mount them ("Failed to mount '/my_product'").
 	// clear them; the entries come back with their real devices once
 	// recovery reboots.
-	if (!booted_partitions.empty()) {
+	if (!space_info->booted_partitions.empty()) {
 		for (auto* p : Partitions) {
 			if (!p->Is_Super)
 				continue;
@@ -4092,6 +4065,6 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 
 	LOGINFO("rebuilt logical group '%s' for %zu partitions, total %llu of %llu bytes\n",
 		group_name.c_str(), partitions.size(),
-		(unsigned long long)total_requested, (unsigned long long)group_max_size);
+		(unsigned long long)space_info->required, (unsigned long long)group_max_size);
 	return true;
 }

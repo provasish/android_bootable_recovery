@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 
 #include <string.h>
@@ -60,6 +61,8 @@
 #include "twinstall/install.h"
 #include "twinstall/verifier.h"
 #include "twinstall/ota_device_check.h"
+#include "twinstall/flash_review.h"
+#include "twinstall/flash_review_api.h"
 #include "variables.h"
 #include "data.hpp"
 #include "partitions.hpp"
@@ -292,6 +295,8 @@ namespace {
 const char* kHighSpeedExtractorPath = "/system/bin/otaripper";
 
 std::string g_hs_reason;
+std::mutex g_review_mutex;
+twrp::FlashReviewConsent g_review_consent;
 
 void HsWhy(const std::string& why) { g_hs_reason = why; }
 void HsSay(const std::string& text) { gui_print("%s\n", text.c_str()); }
@@ -792,6 +797,168 @@ bool ProbeHighSpeedPayload(const std::string& package_path, ZipArchiveHandle zip
 	return true;
 }
 
+
+bool CheckHighSpeedDeviceMetadata(ZipArchiveHandle zip, std::string* reason) {
+	ZipEntry64 entry;
+	if (FindEntry(zip, "META-INF/com/android/metadata", &entry) != 0 ||
+	    entry.uncompressed_length == 0 || entry.uncompressed_length > 64 * 1024) {
+		*reason = "Missing or oversized OTA device metadata";
+		return false;
+	}
+	std::string metadata(entry.uncompressed_length, '\0');
+	if (ExtractToMemory(zip, &entry, reinterpret_cast<uint8_t*>(&metadata[0]), metadata.size()) != 0) {
+		*reason = "Cannot read OTA device metadata";
+		return false;
+	}
+	return twrp::CheckOtaDevice(metadata, TWFunc::Get_OTA_Assert_Devices(), reason);
+}
+
+// No writes, mapping changes, unmounts or snapshot cancellation in this path.
+// The actual installer reopens/rechecks the package and rebuilds its own plan.
+bool BuildHighSpeedReview(const std::string& package, ZipArchiveHandle zip,
+                          twrp::FlashReview* review, std::string* reason) {
+	*review = twrp::FlashReview{};
+	ZipEntry64 entry;
+	if (FindEntry(zip, AB_OTA, &entry) != 0 ||
+	    FindEntry(zip, "META-INF/com/google/android/update-binary", &entry) == 0) {
+		*reason = "This ZIP needs the normal installer. Turn high-speed flash off";
+		return false;
+	}
+	if (!CheckHighSpeedDeviceMetadata(zip, reason))
+		return false;
+	if (access(kHighSpeedExtractorPath, X_OK) != 0) {
+		*reason = "High-speed extractor is unavailable. Turn high-speed flash off";
+		return false;
+	}
+	review->booted_slot = DetermineBootedSlot();
+	review->active_slot = PartitionManager.Get_Active_Slot_Display();
+	if (review->booted_slot.empty()) {
+		*reason = "Cannot determine which slot recovery booted from";
+		return false;
+	}
+	review->target_slot = review->booted_slot == "A" ? "B" : "A";
+	const std::string source_suffix = review->booted_slot == "A" ? "_a" : "_b";
+	const std::string target_suffix = review->target_slot == "A" ? "_a" : "_b";
+	review->readback = DataManager::GetIntValue("tw_high_speed_readback") != 0;
+#ifdef TW_OEM_BUILD
+	review->verify_signature = true;
+#else
+	review->verify_signature = DataManager::GetIntValue(TW_SIGNED_ZIP_VERIFY_VAR) != 0;
+#endif
+	review->reflash_recovery = DataManager::GetIntValue(TW_AUTO_REFLASHTWRP_VAR) != 0;
+	review->inject_recovery = DataManager::GetIntValue(TW_INJECT_AFTER_ZIP) != 0;
+	review->reboot_after = DataManager::GetIntValue("tw_install_reboot") != 0;
+	review->overwrite_allowed = DataManager::GetIntValue("tw_high_speed_overwrite") != 0;
+	const bool firmware = DataManager::GetIntValue("tw_high_speed_firmware") != 0;
+	std::vector<HighSpeedPartitionPlan> plan;
+	HighSpeedGroupSpec group;
+	std::vector<std::string> skipped;
+	if (!ProbeHighSpeedPayload(package, zip, firmware, &plan, &group, &skipped)) {
+		*reason = g_hs_reason + ". Turn high-speed flash off to use the normal installer";
+		return false;
+	}
+	review->skipped_firmware = skipped.size();
+	review->file = TWFunc::Get_Filename(package);
+	// Prevent line/control characters and variable delimiters in filenames
+	// from being interpreted as extra summary content by the GUI textbox.
+	for (char& c : review->file)
+		if (static_cast<unsigned char>(c) < 32 || c == '%')
+			c = '?';
+	struct stat file_stat;
+	if (stat(package.c_str(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode)) {
+		*reason = "Cannot read the ZIP file identity";
+		return false;
+	}
+	auto bind = [&](const std::string& value) { twrp::BindReviewField(&review->binding, value); };
+	bind(package);
+	bind(std::to_string(file_stat.st_dev));
+	bind(std::to_string(file_stat.st_ino));
+	bind(std::to_string(file_stat.st_size));
+	bind(std::to_string(file_stat.st_mtim.tv_sec));
+	bind(std::to_string(file_stat.st_mtim.tv_nsec));
+	bind(review->booted_slot);
+	bind(review->active_slot);
+	bind(std::to_string(review->readback));
+	bind(std::to_string(review->overwrite_allowed));
+	bind(std::to_string(firmware));
+	bind(std::to_string(review->verify_signature));
+	bind(std::to_string(review->reflash_recovery));
+	bind(std::to_string(review->inject_recovery));
+	bind(std::to_string(review->reboot_after));
+	bind(DataManager::GetStrValue(TW_SKIP_DIGEST_CHECK_ZIP_VAR));
+	bind(DataManager::GetStrValue(TW_UNMOUNT_SYSTEM));
+	bind(group.name);
+	bind(std::to_string(group.size));
+	std::vector<std::pair<std::string, uint64_t>> logical;
+	std::set<std::string> names, nodes;
+	for (auto& part : plan) {
+		if (!names.insert(part.name).second || part.expanded_size == 0 || part.sha256.size() != SHA256_DIGEST_LENGTH) {
+			*reason = "Duplicate partition or invalid image size/hash in the payload";
+			return false;
+		}
+		bind(part.name);
+		bind(std::to_string(part.expanded_size));
+		bind(part.sha256);
+		if (part.is_logical) {
+			logical.push_back({part.name, part.expanded_size});
+			continue;
+		}
+		std::string node;
+		if (!ResolvePhysicalTarget(part, source_suffix, target_suffix, &node)) {
+			*reason = g_hs_reason;
+			return false;
+		}
+		uint64_t size = 0;
+		struct stat node_stat;
+		if (!GetBlockDeviceSize(node, &size) || size < part.expanded_size ||
+		    stat(node.c_str(), &node_stat) != 0 || !nodes.insert(node).second) {
+			*reason = "Physical image target is too small, unavailable, or duplicated";
+			return false;
+		}
+		bind(node);
+		bind(std::to_string(size));
+		bind(std::to_string(node_stat.st_rdev));
+		if (part.is_firmware)
+			review->firmware.push_back(part.name);
+		if (part.is_shared)
+			review->shared.push_back(part.name);
+	}
+	review->has_logical = !logical.empty();
+	if (!PartitionManager.Rebuild_Logical_Group_For_High_Speed_Flash(target_suffix, logical,
+	        group.name, group.size, review->overwrite_allowed, nullptr, true, &review->space)) {
+		*reason = review->space.error.empty() ? "Cannot plan the Super layout; see recovery log" : review->space.error;
+		return false;
+	}
+	bind(review->space.metadata_id);
+	bind(std::to_string(review->space.reuses_booted));
+	return true;
+}
+
+bool CheckConfirmedHighSpeedReview(const std::string& package, ZipArchiveHandle zip, bool* reviewed) {
+	*reviewed = false;
+	{
+		std::lock_guard<std::mutex> lock(g_review_mutex);
+		if (!g_review_consent.confirmed)
+			return true; // Sideload/ORS keep their existing flow.
+		*reviewed = true;
+	}
+	twrp::FlashReview review;
+	std::string reason;
+	const bool valid = DataManager::GetIntValue("tw_high_speed_flash") != 0 &&
+	                   BuildHighSpeedReview(package, zip, &review, &reason);
+	bool matched;
+	{
+		std::lock_guard<std::mutex> lock(g_review_mutex);
+		matched = valid && g_review_consent.Consume(package, review.binding);
+		g_review_consent.Clear();
+	}
+	if (!matched) {
+		HsFail("The reviewed package, options, slot or layout changed. Review again before flashing. " + reason);
+		return false;
+	}
+	return true;
+}
+
 }  // namespace
 
 enum class HighSpeedResult {
@@ -803,13 +970,17 @@ enum class HighSpeedResult {
 
 // for stops that happen before anything on the device was changed, where
 // the normal update_engine install can safely take over
-static HighSpeedResult HsUnsupported(const std::string& why) {
+static HighSpeedResult HsUnsupported(const std::string& why, bool allow_fallback) {
+	if (!allow_fallback) {
+		HsFail("Reviewed high-speed plan cannot run: " + why + ". No normal-installer fallback was started");
+		return HighSpeedResult::kAborted;
+	}
 	gui_print_color("warning", "  High-speed flash can't take this zip: %s\n", why.c_str());
 	gui_print_color("warning", "  Nothing was written. Continuing with the normal install.\n");
 	return HighSpeedResult::kUnsupported;
 }
 
-static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArchiveHandle zip) {
+static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArchiveHandle zip, bool allow_fallback) {
 	if (!DataManager::GetIntValue("tw_high_speed_flash"))
 		return HighSpeedResult::kNotApplicable;
 
@@ -819,21 +990,8 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 
 	// A payload's partition names do not identify its device. This rejection
 	// must never fall back to update_engine, even though nothing was written.
-	ZipEntry64 metadata_entry;
-	if (FindEntry(zip, "META-INF/com/android/metadata", &metadata_entry) != 0 ||
-	    metadata_entry.uncompressed_length == 0 ||
-	    metadata_entry.uncompressed_length > 64 * 1024) {
-		HsFail("missing or oversized OTA device metadata; nothing was written");
-		return HighSpeedResult::kAborted;
-	}
-	std::string metadata(metadata_entry.uncompressed_length, '\0');
-	if (ExtractToMemory(zip, &metadata_entry, reinterpret_cast<uint8_t*>(&metadata[0]),
-	                    metadata.size()) != 0) {
-		HsFail("can't read OTA device metadata; nothing was written");
-		return HighSpeedResult::kAborted;
-	}
 	std::string device_reason;
-	if (!twrp::CheckOtaDevice(metadata, TWFunc::Get_OTA_Assert_Devices(), &device_reason)) {
+	if (!CheckHighSpeedDeviceMetadata(zip, &device_reason)) {
 		HsFail(device_reason + "; nothing was written");
 		return HighSpeedResult::kAborted;
 	}
@@ -844,7 +1002,7 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	// install (kUnsupported). every later way out is kAborted -- once
 	// something may have been changed we never drop back to the normal path.
 	if (access(kHighSpeedExtractorPath, X_OK) != 0)
-		return HsUnsupported("extractor missing (/system/bin/otaripper)");
+		return HsUnsupported("extractor missing (/system/bin/otaripper)", allow_fallback);
 
 	HsSay("High-speed flash");
 	HsSay("  Reading payload...");
@@ -853,7 +1011,7 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	std::vector<std::string> skipped_firmware;
 	const bool include_firmware = DataManager::GetIntValue("tw_high_speed_firmware") != 0;
 	if (!ProbeHighSpeedPayload(package, zip, include_firmware, &plan, &group_spec, &skipped_firmware))
-		return HsUnsupported(g_hs_reason);
+		return HsUnsupported(g_hs_reason, allow_fallback);
 
 	{
 		uint64_t total = 0;
@@ -906,7 +1064,7 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 			continue;
 		std::string node;
 		if (!ResolvePhysicalTarget(part, booted_suffix, target_suffix, &node))
-			return HsUnsupported(g_hs_reason);
+			return HsUnsupported(g_hs_reason, allow_fallback);
 		uint64_t node_size = 0;
 		if (!GetBlockDeviceSize(node, &node_size)) {
 			HsFail("can't read the size of the '" + part.name + "' target");
@@ -951,9 +1109,9 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	}
 
 	// ---- first destructive step: lay out the target slot's Super group
-	// in ONE pass, at final sizes, so the dm nodes exist at the right size
-	// before the extractor claims them. this only rewrites the TARGET slot's
-	// metadata; the booted slot's partitions are never touched.
+	// in ONE pass, at final sizes, so the dm nodes exist before extraction.
+	// Only the target slot's table is committed. If the reviewed, opted-in
+	// plan needs the booted ROM's space, its mappings are released for reuse.
 	std::map<std::string, std::string> mapped_paths;
 	{
 		std::vector<std::pair<std::string, uint64_t>> logical_sizes;
@@ -1236,6 +1394,41 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 }
 // ---------------------------------------------------------------------
 
+
+void TW_Clear_High_Speed_Flash_Review() {
+	std::lock_guard<std::mutex> lock(g_review_mutex);
+	g_review_consent.Clear();
+}
+
+bool TW_Prepare_High_Speed_Flash_Review(const std::string& path, std::string* text) {
+	TW_Clear_High_Speed_Flash_Review();
+	ZipArchiveHandle zip = nullptr;
+	if (OpenArchive(path.c_str(), &zip) != 0) {
+		*text = "Cannot open this ZIP. No partitions were changed.";
+		return false;
+	}
+	twrp::FlashReview review;
+	std::string reason;
+	const bool valid = BuildHighSpeedReview(path, zip, &review, &reason);
+	CloseArchive(zip);
+	if (!valid) {
+		*text = reason + "\n\nNo partitions were changed. Go back to change install options.";
+		return false;
+	}
+	{
+		std::lock_guard<std::mutex> lock(g_review_mutex);
+		g_review_consent.path = path;
+		g_review_consent.binding = review.binding;
+	}
+	*text = twrp::RenderFlashReview(review);
+	return true;
+}
+
+bool TW_Confirm_High_Speed_Flash_Review(const std::string& path) {
+	std::lock_guard<std::mutex> lock(g_review_mutex);
+	return g_review_consent.Confirm(path);
+}
+
 int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	int ret_val, zip_verify = 1, unmount_system = 1, reflashtwrp = 0;
 
@@ -1293,6 +1486,10 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		return INSTALL_CORRUPT;
 	}
 
+	bool reviewed_install = false;
+	if (!CheckConfirmedHighSpeedReview(path, Zip, &reviewed_install))
+		return INSTALL_ERROR;
+
 	if (unmount_system) {
 		gui_msg("unmount_system=Unmounting System...");
 		if(!PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), true)) {
@@ -1324,8 +1521,9 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		ZipEntry64 ab_binary_entry;
 		if (FindEntry(Zip, ab_binary_name, &ab_binary_entry) == 0) {
 			LOGINFO("AB zip\n");
-			HighSpeedResult hs_res = TryHighSpeedAbInstall(path, Zip);
-			if (hs_res == HighSpeedResult::kAborted) {
+			HighSpeedResult hs_res = TryHighSpeedAbInstall(path, Zip, !reviewed_install);
+			if (hs_res == HighSpeedResult::kAborted ||
+			    (reviewed_install && hs_res != HighSpeedResult::kSucceeded)) {
 				// nothing past this point may run: the target slot can be
 				// half written, and the active slot was not switched
 				ret_val = INSTALL_ERROR;
@@ -1356,7 +1554,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 				}
 				gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
 				DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
-				if (reflashtwrp) {
+				if (reflashtwrp && ret_val == INSTALL_SUCCESS) {
 				twrpRepacker repacker;
 				repacker.Flash_Current_Twrp();
 				}
