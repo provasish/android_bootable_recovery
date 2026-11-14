@@ -37,9 +37,9 @@ from modifying block devices concurrently with recovery.
 
 A reviewed install cannot fall back to update_engine because its partition or
 firmware choices could differ from the displayed plan. Automatic recovery
-reflash/reinjection runs only after a successful install. Normal flashing,
-ADB sideload and OpenRecoveryScript retain their existing entry points; the
-new review screen is for local GUI installs. Review currently requires one
+reflash/reinjection runs only after a successful install. Normal flashing
+and OpenRecoveryScript retain their existing entry points; ADB sideload has
+its own reviewed flow (below). Review currently requires one
 ROM ZIP in the queue. Turn high-speed flashing off for a normal ZIP batch or
 for a package that requires the normal installer.
 
@@ -47,6 +47,29 @@ Portrait, landscape and watch stock themes include the review page. Textboxes
 now split expanded multiline values into logical lines before word wrapping
 and rebuild their contents only when the expanded text changes. The summary's
 detailed body is currently English; button labels use normal theme resources.
+
+## ADB sideload
+
+Advanced → ADB Sideload has its own **High-speed flash** toggle
+(`tw_sideload_high_speed`) with the same verify/firmware/overwrite options.
+The Install screen's toggle no longer carries over to a sideload.
+
+The package only exists once `adb sideload` starts serving it, so the review
+happens inside the install while adb waits:
+
+1. Signature/digest checks run as usual, then the same plan is built and shown
+   on the **Review Sideload Flash** page.
+2. **Swipe to Install** continues; **Cancel Install**, Back or Home stops the
+   install before anything is written. A plan that can't run shows only Cancel.
+3. On confirm, the plan is built again and must match what was shown, then
+   it installs as a reviewed plan: no fallback to update_engine.
+
+The page only sets `tw_sideload_hs_decision`; the waiting install thread
+reads it and returns to the sideload progress page. A theme without a
+`sideload_review` page makes the install stop instead of waiting. Sideload
+never reboots on its own, so the review always shows "Reboot after install:
+OFF". The payload is read over USB through the sideload FUSE file, so the
+transfer usually limits the speed; installing from storage is faster.
 
 ## Validation
 
@@ -70,7 +93,12 @@ Run the existing `twrp_ota_device_check_test` for OTA metadata checks.
 `python3 tests/test_flash_review_navigation.py` runs the actual GUIAction
 variable/key dispatch methods in a host harness against each stock review
 page. It checks that planning completion does not navigate away, and that
-Back/Home navigate only after a key press/release. Keep the review page's
+Back/Home navigate only after a key press/release; it also checks that every
+theme's `sideload_review` page only sets the decision variable.
+`python3 tests/test_sideload_review.py` compiles the sideload review code
+from `twinstall.cpp` and `action.cpp` against stubs and runs confirm,
+cancel, changed-plan, invalid-plan, missing-page and toggle-separation cases.
+Keep the review page's
 key-only actions free of variable conditions: GUIAction also executes
 conditional actions when their watched variable changes. The on-screen
 navigation buttons and install slider retain their busy-state conditions.

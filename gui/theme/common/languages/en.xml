@@ -323,6 +323,9 @@
 		<string name="hs_review_hdr">Review Flash</string>
 		<string name="hs_review_back">Back to Options</string>
 		<string name="hs_review_swipe">Swipe to Install</string>
+		<string name="hs_sideload_review_hdr">Review Sideload Flash</string>
+		<string name="hs_review_cancel">Cancel Install</string>
+		<string name="sideload_hs_note">Plan is reviewed before writing</string>
 		<string name="high_speed_readback_chk">High-speed: verify images after writing</string>
 		<string name="high_speed_firmware_chk">High-speed: also flash firmware</string>
 		<string name="high_speed_overwrite_chk">High-speed: allow overwriting the current slot</string>

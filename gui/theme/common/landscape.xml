@@ -5480,6 +5480,52 @@ edi				<conditions>
 				<data variable="tw_wipe_cache"/>
 			</checkbox>
 
+			<checkbox>
+				<condition var1="tw_has_boot_slots" var2="1"/>
+				<placement x="%col1_x_left%" y="%row5_y%"/>
+				<text>{@high_speed_flash_chk=High-speed flash (A/B ROM zips)}</text>
+				<data variable="tw_sideload_high_speed"/>
+			</checkbox>
+
+			<checkbox>
+				<conditions>
+					<condition var1="tw_has_boot_slots" var2="1"/>
+					<condition var1="tw_sideload_high_speed" var2="1"/>
+				</conditions>
+				<placement x="%col1_x_left%" y="%row6a_y%"/>
+				<text>{@high_speed_readback_chk=High-speed: verify images after writing}</text>
+				<data variable="tw_high_speed_readback"/>
+			</checkbox>
+
+			<checkbox>
+				<conditions>
+					<condition var1="tw_has_boot_slots" var2="1"/>
+					<condition var1="tw_sideload_high_speed" var2="1"/>
+				</conditions>
+				<placement x="%col1_x_left%" y="%row8_y%"/>
+				<text>{@high_speed_firmware_chk=High-speed: also flash firmware}</text>
+				<data variable="tw_high_speed_firmware"/>
+			</checkbox>
+
+			<checkbox>
+				<conditions>
+					<condition var1="tw_has_boot_slots" var2="1"/>
+					<condition var1="tw_sideload_high_speed" var2="1"/>
+				</conditions>
+				<placement x="%col1_x_left%" y="%row9a_y%"/>
+				<text>{@high_speed_overwrite_chk=High-speed: allow overwriting the current slot}</text>
+				<data variable="tw_high_speed_overwrite"/>
+			</checkbox>
+
+			<text style="text_m_accent">
+				<conditions>
+					<condition var1="tw_has_boot_slots" var2="1"/>
+					<condition var1="tw_sideload_high_speed" var2="1"/>
+				</conditions>
+				<placement x="%col1_x_left%" y="%row11_y%"/>
+				<text>{@sideload_hs_note=Plan is reviewed before writing}</text>
+			</text>
+
 			<slider style="slider_centered">
 				<text>{@swipe_to_sideload=Swipe to Start Sideload}</text>
 				<actions>
@@ -5503,6 +5549,41 @@ edi				<conditions>
 			<action>
 				<touch key="back"/>
 				<action function="page">advanced</action>
+			</action>
+		</page>
+
+		<page name="sideload_review">
+			<template name="page"/>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>{@hs_sideload_review_hdr=Review Sideload Flash}</text>
+			</text>
+
+			<textbox style="console">
+				<placement x="%col1_x_left%" y="%row2_y%" w="%content_width%" h="%console_height%"/>
+				<text>%tw_hs_review_text%</text>
+			</textbox>
+
+			<button style="main_button_half_width">
+				<placement x="%col1_x_left%" y="%row17a_y%"/>
+				<text>{@hs_review_cancel=Cancel Install}</text>
+				<action function="set">tw_sideload_hs_decision=2</action>
+			</button>
+
+			<slider>
+				<condition var1="tw_hs_review_ready" var2="1"/>
+				<text>{@hs_review_swipe=Swipe to Install}</text>
+				<action function="set">tw_sideload_hs_decision=1</action>
+			</slider>
+
+			<action>
+				<touch key="back"/>
+				<action function="set">tw_sideload_hs_decision=2</action>
+			</action>
+			<action>
+				<touch key="home"/>
+				<action function="set">tw_sideload_hs_decision=2</action>
 			</action>
 		</page>
 
