@@ -63,6 +63,14 @@ c++ -std=c++17 -Wall -Wextra -Werror \
 The Android build also exposes the `twrp_flash_review_test` host test target.
 Run the existing `twrp_ota_device_check_test` for OTA metadata checks.
 
+`python3 tests/test_flash_review_navigation.py` runs the actual GUIAction
+variable/key dispatch methods in a host harness against each stock review
+page. It checks that planning completion does not navigate away, and that
+Back/Home navigate only after a key press/release. Keep the review page's
+key-only actions free of variable conditions: GUIAction also executes
+conditional actions when their watched variable changes. The on-screen
+navigation buttons and install slider retain their busy-state conditions.
+
 On device, first open a summary and return to options without flashing. Check
 the displayed slots against recovery boot properties and bootctl, and compare
 the Super figures with lpdump. Test firmware off/on, read-back off/on, a

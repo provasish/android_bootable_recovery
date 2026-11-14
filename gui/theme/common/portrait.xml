@@ -518,12 +518,10 @@
 			</slider>
 
 			<action>
-				<condition var1="tw_busy" var2="0"/>
 				<touch key="back"/>
 				<action function="page">flash_confirm</action>
 			</action>
 			<action>
-				<condition var1="tw_busy" var2="0"/>
 				<touch key="home"/>
 				<action function="page">main</action>
 			</action>
