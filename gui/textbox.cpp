@@ -27,6 +27,7 @@ extern "C" {
 
 #include "rapidxml.hpp"
 #include "objects.hpp"
+#include "textbox_lines.hpp"
 
 GUITextBox::GUITextBox(xml_node<>* node) : GUIScrollList(node)
 {
@@ -51,7 +52,8 @@ GUITextBox::GUITextBox(xml_node<>* node) : GUIScrollList(node)
 		string lookup = gui_parse_text(txt);
 		if (lookup != txt)
 			mIsStatic = false;
-		mLastValue.push_back(lookup);
+		const auto lines = SplitTextBoxLines(lookup);
+		mLastValue.insert(mLastValue.end(), lines.begin(), lines.end());
 		child = child->next_sibling("text");
 	}
 }
@@ -104,20 +106,17 @@ int GUITextBox::NotifyVarChange(const std::string& varName, const std::string& v
 	if (!isConditionTrue() || mIsStatic)
 		return 0;
 
-	// Check to see if the variable exists in mText
+	// Expand dynamic text as logical lines before the scroll list wraps it.
+	std::vector<std::string> expanded;
 	for (size_t i = 0; i < mText.size(); i++) {
-		string lookup = gui_parse_text(mText.at(i));
-		if (lookup != mText.at(i)) {
-			mLastValue.at(i) = lookup;
-			mUpdate = 1;
-			// There are ways to improve efficiency here, but I am not
-			// sure if we will even use this feature in the stock theme
-			// at all except for language translation. If we start using
-			// variables in textboxes in the stock theme, we can circle
-			// back and make improvements here.
-			mLastCount = 0;
-			rText.clear();
-		}
+		const auto lines = SplitTextBoxLines(gui_parse_text(mText.at(i)));
+		expanded.insert(expanded.end(), lines.begin(), lines.end());
+	}
+	if (expanded != mLastValue) {
+		mLastValue = std::move(expanded);
+		mUpdate = 1;
+		mLastCount = 0;
+		rText.clear();
 	}
 	return 0;
 }

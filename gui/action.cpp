@@ -48,6 +48,7 @@
 #include "fuse_sideload.h"
 #include "blanktimer.hpp"
 #include "twinstall.h"
+#include "twinstall/flash_review_api.h"
 
 extern "C" {
 #include "../twcommon.h"
@@ -217,6 +218,7 @@ GUIAction::GUIAction(xml_node<>* node)
 
 		// These actions will run in a separate thread
 		ADD_ACTION(flash);
+		ADD_ACTION(reviewhighspeedflash);
 		ADD_ACTION(wipe);
 		ADD_ACTION(refreshsizes);
 		ADD_ACTION(nandroid);
@@ -414,7 +416,7 @@ int GUIAction::flash_zip(std::string filename, int* wipe_cache)
 		PartitionManager.Unlock_Block_Partitions();
 		// Now, check if we need to ensure TWRP remains installed...
 		struct stat st;
-		if (stat("/system/bin/installTwrp", &st) == 0)
+		if (ret_val == 0 && stat("/system/bin/installTwrp", &st) == 0)
 		{
 			DataManager::SetValue("tw_operation", "Configuring TWRP");
 			DataManager::SetValue("tw_partition", "");
@@ -820,6 +822,7 @@ int GUIAction::overlay(std::string arg)
 
 int GUIAction::queuezip(std::string arg __unused)
 {
+	TW_Clear_High_Speed_Flash_Review();
 	if (zip_queue_index >= 10) {
 		gui_msg("max_queue=Maximum zip queue reached!");
 		return 0;
@@ -834,6 +837,7 @@ int GUIAction::queuezip(std::string arg __unused)
 
 int GUIAction::cancelzip(std::string arg __unused)
 {
+	TW_Clear_High_Speed_Flash_Review();
 	if (zip_queue_index <= 0) {
 		gui_msg("min_queue=Minimum zip queue reached!");
 		return 0;
@@ -846,6 +850,7 @@ int GUIAction::cancelzip(std::string arg __unused)
 
 int GUIAction::queueclear(std::string arg __unused)
 {
+	TW_Clear_High_Speed_Flash_Review();
 	zip_queue_index = 0;
 	DataManager::SetValue(TW_ZIP_QUEUE_COUNT, zip_queue_index);
 	return 0;
@@ -1093,8 +1098,38 @@ int GUIAction::ozip_decrypt(string zip_path)
 	return 0;
 }
 
+int GUIAction::reviewhighspeedflash(std::string arg __unused)
+{
+	operation_start("Review Flash");
+	TW_Clear_High_Speed_Flash_Review();
+	DataManager::SetValue("tw_hs_review_ready", 0);
+	DataManager::SetValue("tw_hs_review_text", "Reading the install plan...");
+	gui_changePage("flash_review");
+	std::string text;
+	bool ready = false;
+	if (simulate)
+		text = "Simulation: no install plan was approved.";
+	else if (!DataManager::GetIntValue("tw_high_speed_flash"))
+		text = "High-speed flash is off. Go back to use the normal installer.";
+	else if (zip_queue_index != 1)
+		text = "Review one ROM ZIP at a time. Go back and clear the queue, or turn high-speed flash off for a ZIP batch. No partitions were changed.";
+	else
+		ready = TW_Prepare_High_Speed_Flash_Review(zip_queue[0], &text);
+	DataManager::SetValue("tw_hs_review_text", text);
+	DataManager::SetValue("tw_hs_review_ready", ready ? 1 : 0);
+	operation_end(ready ? 0 : 1);
+	return 0;
+}
+
 int GUIAction::flash(std::string arg)
 {
+	if (DataManager::GetIntValue("tw_high_speed_flash") || arg == "flash_reviewed") {
+		if (arg != "flash_reviewed" || zip_queue_index != 1 ||
+		    !DataManager::GetIntValue("tw_high_speed_flash") ||
+		    !TW_Confirm_High_Speed_Flash_Review(zip_queue[0]))
+			return reviewhighspeedflash("");
+		arg = "flash_zip";
+	}
 	int i, ret_val = 0, wipe_cache = 0;
 	// We're going to jump to this page first, like a loading page
 	gui_changePage(arg);
@@ -1131,13 +1166,15 @@ int GUIAction::flash(std::string arg)
 		}
 	}
 	zip_queue_index = 0;
+	TW_Clear_High_Speed_Flash_Review();
 
 	if (wipe_cache) {
 		gui_msg("zip_wipe_cache=One or more zip requested a cache wipe -- Wiping cache now.");
 		PartitionManager.Wipe_By_Path("/cache");
 	}
 
-	reinject_after_flash();
+	if (ret_val == 0)
+		reinject_after_flash();
 	PartitionManager.Update_System_Details();
 	operation_end(ret_val);
 	// This needs to be after the operation_end call so we change pages before we change variables that we display on the screen

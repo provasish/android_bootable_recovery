@@ -319,6 +319,10 @@
 		<string name="use_rmrf_chk">Use rm -rf instead of formatting</string>
 		<string name="auto_reflashtwrp_chk">Automatically Reflash TWRP after flashing a ROM</string>
 		<string name="high_speed_flash_chk">High-speed flash (A/B ROM zips)</string>
+		<string name="hs_review_btn">Review Flash</string>
+		<string name="hs_review_hdr">Review Flash</string>
+		<string name="hs_review_back">Back to Options</string>
+		<string name="hs_review_swipe">Swipe to Install</string>
 		<string name="high_speed_readback_chk">High-speed: verify images after writing</string>
 		<string name="high_speed_firmware_chk">High-speed: also flash firmware</string>
 		<string name="high_speed_overwrite_chk">High-speed: allow overwriting the current slot</string>

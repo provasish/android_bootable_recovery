@@ -25,6 +25,7 @@
 #include <sys/poll.h>
 #include "exclude.hpp"
 #include "tw_atomic.hpp"
+#include "twrpinstall/include/twinstall/flash_review.h"
 #include "progresstracking.hpp"
 #ifdef TW_INCLUDE_CRYPTO
 #include "fscrypt_policy.h"
@@ -415,7 +416,8 @@ public:
 		const std::vector<std::pair<std::string, uint64_t>>& partitions,
 		const std::string& declared_group_name, uint64_t declared_group_size,
 		bool allow_overwrite_booted,
-		std::map<std::string, std::string>* mapped_paths);                    // Lay out and map the target slot's Super group for a high-speed flash
+		std::map<std::string, std::string>* mapped_paths,
+		bool preview_only = false, twrp::FlashSpaceInfo* space_info = nullptr); // Preview is in memory only; never unmaps or writes
 
 private:
 	void Setup_Settings_Storage_Partition(TWPartition* Part);                 // Sets up settings storage
