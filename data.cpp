@@ -782,6 +782,8 @@ void DataManager::SetDefaultValues()
 	mData.SetValue("tw_high_speed_readback", "1"); // re-read every written image from storage
 	mData.SetValue("tw_high_speed_firmware", "0"); // also write firmware partitions
 	mData.SetValue("tw_high_speed_overwrite", "0"); // reuse the booted slot's Super space if the ROM doesn't fit beside it
+	mData.SetValue("tw_sideload_high_speed", "0"); // ADB sideload's own high-speed toggle, reviewed on the device
+	mData.SetValue("tw_sideload_hs_decision", "0"); // sideload review answer: 1 install, 2 cancel
 	mData.SetValue("tw_hs_review_ready", "0");
 	mData.SetValue("tw_hs_review_text", "");
 	mData.SetValue("tw_wipe_cache", "0");

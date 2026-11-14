@@ -36,6 +36,7 @@
 #include <linux/fs.h>
 
 #include <algorithm>
+#include <atomic>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -302,6 +303,20 @@ void HsWhy(const std::string& why) { g_hs_reason = why; }
 void HsSay(const std::string& text) { gui_print("%s\n", text.c_str()); }
 void HsWarn(const std::string& text) { gui_print_color("warning", "%s\n", text.c_str()); }
 void HsFail(const std::string& what) { gui_print_color("error", "  ERROR: %s\n", what.c_str()); }
+
+// ADB sideload has its own toggle (tw_sideload_high_speed), so turning
+// high-speed flash on in the Install screen never carries over to a sideload.
+bool IsSideloadPackage(const std::string& package) {
+	return package.compare(0, 9, "/sideload") == 0;
+}
+
+bool HighSpeedEnabledFor(const std::string& package) {
+	return DataManager::GetIntValue(IsSideloadPackage(package) ? "tw_sideload_high_speed"
+	                                                            : "tw_high_speed_flash") != 0;
+}
+
+// Set by the GUI; shows a sideload review and blocks until confirm/cancel.
+std::atomic<TW_Sideload_Review_Prompt> g_sideload_prompt{nullptr};
 
 std::string HsSize(uint64_t bytes) {
 	char buf[32];
@@ -847,7 +862,8 @@ bool BuildHighSpeedReview(const std::string& package, ZipArchiveHandle zip,
 #endif
 	review->reflash_recovery = DataManager::GetIntValue(TW_AUTO_REFLASHTWRP_VAR) != 0;
 	review->inject_recovery = DataManager::GetIntValue(TW_INJECT_AFTER_ZIP) != 0;
-	review->reboot_after = DataManager::GetIntValue("tw_install_reboot") != 0;
+	// ADB sideload never reboots on its own.
+	review->reboot_after = !IsSideloadPackage(package) && DataManager::GetIntValue("tw_install_reboot") != 0;
 	review->overwrite_allowed = DataManager::GetIntValue("tw_high_speed_overwrite") != 0;
 	const bool firmware = DataManager::GetIntValue("tw_high_speed_firmware") != 0;
 	std::vector<HighSpeedPartitionPlan> plan;
@@ -944,7 +960,7 @@ bool CheckConfirmedHighSpeedReview(const std::string& package, ZipArchiveHandle 
 	}
 	twrp::FlashReview review;
 	std::string reason;
-	const bool valid = DataManager::GetIntValue("tw_high_speed_flash") != 0 &&
+	const bool valid = HighSpeedEnabledFor(package) &&
 	                   BuildHighSpeedReview(package, zip, &review, &reason);
 	bool matched;
 	{
@@ -959,7 +975,47 @@ bool CheckConfirmedHighSpeedReview(const std::string& package, ZipArchiveHandle 
 	return true;
 }
 
+// ADB sideload: the package only exists once the host starts serving it, so
+// the review happens here, inside the install, while adb waits. Returns false
+// to stop the install before anything is written. On true, *reviewed means
+// the caller must treat the plan as reviewed (no normal-installer fallback).
+bool ReviewSideloadHighSpeed(const std::string& package, ZipArchiveHandle zip, bool* reviewed) {
+	*reviewed = false;
+	ZipEntry64 unused;
+	if (!IsSideloadPackage(package) || !HighSpeedEnabledFor(package) ||
+	    FindEntry(zip, "payload_properties.txt", &unused) != 0)
+		return true;
+	const TW_Sideload_Review_Prompt prompt = g_sideload_prompt.load();
+	if (!prompt) {
+		HsFail("no review screen for ADB sideload; nothing was written");
+		return false;
+	}
+	HsSay("High-speed flash: reading the install plan...");
+	twrp::FlashReview review;
+	std::string reason;
+	const bool valid = BuildHighSpeedReview(package, zip, &review, &reason);
+	const std::string text = valid ? twrp::RenderFlashReview(review) :
+	        reason + "\n\nNo partitions were changed. Cancel, change the options on the "
+	                 "ADB Sideload screen, and sideload again.";
+	if (!prompt(text, valid)) {
+		HsFail(valid ? std::string("install cancelled; nothing was written") : reason + "; nothing was written");
+		return false;
+	}
+	// What gets flashed must still be what was shown.
+	twrp::FlashReview again;
+	if (!BuildHighSpeedReview(package, zip, &again, &reason) || again.binding != review.binding) {
+		HsFail("The reviewed package, options, slot or layout changed. Sideload again. " + reason);
+		return false;
+	}
+	*reviewed = true;
+	return true;
+}
+
 }  // namespace
+
+void TW_Set_Sideload_Review_Prompt(TW_Sideload_Review_Prompt prompt) {
+	g_sideload_prompt.store(prompt);
+}
 
 enum class HighSpeedResult {
 	kNotApplicable,  // the toggle was off, or this isn't an A/B payload zip -- run the normal path
@@ -981,7 +1037,7 @@ static HighSpeedResult HsUnsupported(const std::string& why, bool allow_fallback
 }
 
 static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArchiveHandle zip, bool allow_fallback) {
-	if (!DataManager::GetIntValue("tw_high_speed_flash"))
+	if (!HighSpeedEnabledFor(package))
 		return HighSpeedResult::kNotApplicable;
 
 	ZipEntry64 unused;
@@ -1488,6 +1544,8 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 
 	bool reviewed_install = false;
 	if (!CheckConfirmedHighSpeedReview(path, Zip, &reviewed_install))
+		return INSTALL_ERROR;
+	if (!reviewed_install && !ReviewSideloadHighSpeed(path, Zip, &reviewed_install))
 		return INSTALL_ERROR;
 
 	if (unmount_system) {

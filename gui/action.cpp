@@ -1627,6 +1627,28 @@ int GUIAction::decrypt(std::string arg __unused)
 	return 0;
 }
 
+// Runs on the sideload install thread while adb waits for the device. The
+// sideload_review page only sets tw_sideload_hs_decision (1 install, 2 cancel)
+// through plain "set" actions; nothing on it starts another action thread.
+static bool SideloadHighSpeedPrompt(const std::string& text, bool ready)
+{
+	DataManager::SetValue("tw_hs_review_text", text);
+	DataManager::SetValue("tw_hs_review_ready", ready ? 1 : 0);
+	DataManager::SetValue("tw_sideload_hs_decision", 0);
+	const std::string previous = PageManager::GetCurrentPage();
+	gui_changePage("sideload_review");
+	if (PageManager::GetCurrentPage() != "sideload_review") {
+		LOGERR("This theme has no sideload_review page\n");
+		return false;
+	}
+	int decision;
+	while ((decision = DataManager::GetIntValue("tw_sideload_hs_decision")) == 0)
+		usleep(100000);
+	DataManager::SetValue("tw_hs_review_ready", 0);
+	gui_changePage(previous.empty() ? "action_page" : previous);
+	return ready && decision == 1;
+}
+
 int GUIAction::adbsideload(std::string arg __unused)
 {
 	operation_start("Sideload");
@@ -1634,6 +1656,7 @@ int GUIAction::adbsideload(std::string arg __unused)
 		simulate_progress_bar();
 		operation_end(0);
 	} else {
+		TW_Set_Sideload_Review_Prompt(SideloadHighSpeedPrompt);
 		gui_msg("start_sideload=Starting ADB sideload feature...");
 		bool mtp_was_enabled = TWFunc::Toggle_MTP(false);
 

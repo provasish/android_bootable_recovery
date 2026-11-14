@@ -114,5 +114,62 @@ struct GUIAction : GUIObject {
         self.check_theme("watch")
 
 
+class SideloadReviewPage(unittest.TestCase):
+    """The sideload review page answers a waiting install thread.
+
+    While it is shown, the sideload install thread blocks in
+    SideloadHighSpeedPrompt() until tw_sideload_hs_decision changes. Anything
+    on the page other than a plain "set" would try to start a second action
+    (refused while one runs) or navigate away and leave the install waiting.
+    Unconditional key hooks never fire on variable changes (GUIAction only
+    runs keyless/conditional actions from NotifyVarChange), so planning
+    completion can't answer for the user.
+    """
+
+    DECISION = "tw_sideload_hs_decision"
+
+    def check_theme(self, theme):
+        root = ET.parse(ROOT / f"gui/theme/common/{theme}.xml").getroot()
+        page = root.find('.//page[@name="sideload_review"]')
+        self.assertIsNotNone(page, theme)
+        for action in page.iter("action"):
+            function = action.get("function")
+            if function is not None:
+                self.assertEqual(function, "set", f"{theme}: {ET.tostring(action)!r}")
+                self.assertTrue(action.text.startswith(self.DECISION + "="), action.text)
+
+        hooks = {}
+        for action in page.findall("action"):
+            touch = action.find("touch")
+            self.assertIsNotNone(touch, "page-level actions must be key hooks")
+            self.assertEqual(action.findall("condition") + action.findall("conditions/condition"), [])
+            hooks[touch.get("key")] = action.find('action[@function="set"]').text
+        self.assertEqual(hooks, {"back": self.DECISION + "=2", "home": self.DECISION + "=2"})
+
+        slider = page.find("slider")
+        conditions = slider.findall("condition") + slider.findall("conditions/condition")
+        self.assertEqual([c.attrib for c in conditions], [{"var1": "tw_hs_review_ready", "var2": "1"}])
+        self.assertEqual(slider.find('action[@function="set"]').text, self.DECISION + "=1")
+
+        button = page.find("button")
+        self.assertEqual(button.findall("condition") + button.findall("conditions/condition"), [])
+        self.assertEqual(button.find('action[@function="set"]').text, self.DECISION + "=2")
+
+        # The sideload screen has its own toggle and never flips the Install one.
+        sideload = root.find('.//page[@name="sideload"]')
+        variables = [d.get("variable") for d in sideload.iter("data")]
+        self.assertIn("tw_sideload_high_speed", variables)
+        self.assertNotIn("tw_high_speed_flash", variables)
+
+    def test_portrait(self):
+        self.check_theme("portrait")
+
+    def test_landscape(self):
+        self.check_theme("landscape")
+
+    def test_watch(self):
+        self.check_theme("watch")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
