@@ -3943,10 +3943,20 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	if (!declared_group_name.empty() && declared_group_size > 0) {
 		const std::string declared_full_name = declared_group_name + slot_suffix;
 		if (group_name != declared_full_name) {
-			LOGINFO("Payload declares group '%s' but the device's partitions are in group '%s' -- refusing to guess\n",
-				declared_full_name.c_str(), group_name.c_str());
-			gui_print_color("error", "  ERROR: Super layout: the device's group doesn't match the one this ROM declares\n");
-			return false;
+			// The target slot still holds another ROM's group (e.g. moving
+			// between ROMs that name it differently). update_engine replaces
+			// every target-slot group; PlanFlashLayout does the same. Only
+			// accept a group that really belongs to the target slot.
+			if (!android::base::EndsWith(group_name, slot_suffix)) {
+				LOGINFO("Payload declares group '%s' but the device's partitions are in group '%s' -- refusing to guess\n",
+					declared_full_name.c_str(), group_name.c_str());
+				gui_print_color("error", "  ERROR: Super layout: the device's group doesn't match the one this ROM declares\n");
+				return false;
+			}
+			LOGINFO("Target slot group '%s' will be replaced by the payload's '%s'\n",
+				group_name.c_str(), declared_full_name.c_str());
+			space_info->replaced_group = group_name;
+			group_name = declared_full_name;
 		}
 		if (declared_group_size != group_max_size)
 			LOGINFO("Group '%s': using the payload's declared size %llu instead of the device's current %llu\n",
@@ -3997,6 +4007,15 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	// The same in-memory plan passed. Only now release mappings and write it.
 	for (const auto& kv : partitions)
 		DestroyLogicalPartition(kv.first + slot_suffix);
+	// Target-slot partitions the new ROM doesn't have (e.g. stock's my_*_b)
+	// leave the table with their group; don't leave them mapped over extents
+	// the new layout reuses.
+	for (const auto& name : space_info->released_target_partitions) {
+		if (!DestroyLogicalPartition(name)) {
+			gui_print_color("error", "  ERROR: Super layout: can't release the target slot's '%s'. Nothing was written.\n", name.c_str());
+			return false;
+		}
+	}
 	if (space_info->reuses_booted) {
 		for (auto* p : Partitions)
 			if (p->Is_Super)

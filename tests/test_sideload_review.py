@@ -46,9 +46,14 @@ struct DataManager {
     static void SetValue(const std::string& k, const std::string& x) { std::lock_guard<std::mutex> l(m); v[k] = x; }
 };
 std::mutex DataManager::m; std::map<std::string, std::string> DataManager::v;
-std::string g_page = "action_page"; bool g_has_page = true; std::string g_last_fail;
-int gui_changePage(std::string p) { if (p != "sideload_review" || g_has_page) g_page = p; return 0; }
-struct PageManager { static std::string GetCurrentPage() { return g_page; } };
+// Overlay stub: opening sideload_review runs its on-open "set", like PageSet::SetOverlay.
+std::string g_page = "action_page"; bool g_has_page = true; std::string g_last_fail; int g_page_changes = 0;
+int gui_changeOverlay(std::string p) {
+    if (p.empty()) { g_page = "action_page"; return 0; }
+    if (p == "sideload_review" && g_has_page) { g_page = p; DataManager::SetValue("tw_sideload_review_shown", 1); }
+    return 0;
+}
+int gui_changePage(std::string) { g_page_changes++; return 0; }
 #define LOGERR(...) fprintf(stderr, __VA_ARGS__)
 typedef void* ZipArchiveHandle; struct ZipEntry64 {};
 bool g_has_payload = true;
@@ -81,6 +86,7 @@ static bool run(const std::string& pkg, int answer, bool* reviewed) {
     }
     t.join();
     CHECK(g_page == "action_page");
+    CHECK(g_page_changes == 0);  // overlay only: action_page is never re-entered
     return ok;
 }
 

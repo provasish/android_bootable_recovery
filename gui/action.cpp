@@ -1628,16 +1628,20 @@ int GUIAction::decrypt(std::string arg __unused)
 }
 
 // Runs on the sideload install thread while adb waits for the device. The
-// sideload_review page only sets tw_sideload_hs_decision (1 install, 2 cancel)
-// through plain "set" actions; nothing on it starts another action thread.
+// sideload_review page only sets variables through plain "set" actions, so
+// nothing on it starts another action thread. It is shown as an overlay:
+// re-entering action_page would re-run its %tw_action% entry action, which
+// is refused while the sideload is still running.
 static bool SideloadHighSpeedPrompt(const std::string& text, bool ready)
 {
 	DataManager::SetValue("tw_hs_review_text", text);
 	DataManager::SetValue("tw_hs_review_ready", ready ? 1 : 0);
 	DataManager::SetValue("tw_sideload_hs_decision", 0);
-	const std::string previous = PageManager::GetCurrentPage();
-	gui_changePage("sideload_review");
-	if (PageManager::GetCurrentPage() != "sideload_review") {
+	DataManager::SetValue("tw_sideload_review_shown", 0);
+	gui_changeOverlay("sideload_review");
+	// The page sets this when it opens; a theme without it would leave the
+	// install waiting for an answer nobody can give.
+	if (DataManager::GetIntValue("tw_sideload_review_shown") != 1) {
 		LOGERR("This theme has no sideload_review page\n");
 		return false;
 	}
@@ -1645,7 +1649,7 @@ static bool SideloadHighSpeedPrompt(const std::string& text, bool ready)
 	while ((decision = DataManager::GetIntValue("tw_sideload_hs_decision")) == 0)
 		usleep(100000);
 	DataManager::SetValue("tw_hs_review_ready", 0);
-	gui_changePage(previous.empty() ? "action_page" : previous);
+	gui_changeOverlay("");
 	return ready && decision == 1;
 }
 

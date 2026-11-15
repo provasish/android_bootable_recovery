@@ -19,6 +19,11 @@ struct FlashSpaceInfo {
 	uint64_t group_limit = 0;
 	bool reuses_booted = false;
 	std::vector<std::string> booted_partitions;
+	// Target-slot partitions dropped with their groups (all target-slot groups
+	// are replaced, like update_engine), and the old group name when the
+	// target slot was held by a group with another ROM's name.
+	std::vector<std::string> released_target_partitions;
+	std::string replaced_group;
 	std::string metadata_id;
 	std::string error;
 };
@@ -54,6 +59,18 @@ bool PlanFlashLayout(Builder* builder, const std::string& group,
 		return false;
 	}
 	info->capacity = builder->AllocatableSpace();
+	// Like update_engine, the whole target slot is replaced: drop every
+	// target-slot group, including one named by another ROM (e.g. the old
+	// ROM's group still holding system_b when the new ROM uses another name).
+	info->released_target_partitions.clear();
+	for (const auto& g : builder->ListGroups()) {
+		if (g.size() <= target_suffix.size() ||
+		    g.compare(g.size() - target_suffix.size(), target_suffix.size(), target_suffix) != 0)
+			continue;
+		for (const auto* p : builder->ListPartitionsInGroup(g))
+			info->released_target_partitions.push_back(p->name());
+		builder->RemoveGroupAndPartitions(g);
+	}
 	builder->RemoveGroupAndPartitions(group);
 	info->available = info->capacity >= builder->UsedSpace() ? info->capacity - builder->UsedSpace() : 0;
 	info->available_after_reuse = info->available;
@@ -132,6 +149,9 @@ inline std::string RenderFlashReview(const FlashReview& review) {
 		    << "Available beside current ROM: " << ReviewSize(review.space.available) << '\n'
 		    << "Super usable capacity: " << ReviewSize(review.space.capacity) << '\n'
 		    << "ROM group limit: " << ReviewSize(review.space.group_limit) << '\n';
+		if (!review.space.replaced_group.empty())
+			out << "Replaces slot " << review.target_slot << "'s Super group "
+			    << review.space.replaced_group << " (from another ROM)\n";
 		if (review.space.reuses_booted)
 			out << "Available after reuse: " << ReviewSize(review.space.available_after_reuse)
 			    << "\n\nCURRENT ROM SPACE WILL BE REUSED.\n"

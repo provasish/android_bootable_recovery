@@ -92,6 +92,34 @@ static void TestLayout() {
 		CHECK(builder.partitions.count("keep") == 1);
 	}
 	CHECK(source.partitions.count("old_b") == 1); // Preview fixture is a copy.
+
+	// The target slot still holds another ROM's group (seen on RMX3371:
+	// realme_sm8250_mainline_dynpart_b vs. the payload's
+	// qti_dynamic_partitions_b). Like update_engine, every target-slot group
+	// is replaced; the booted slot's and unrelated groups stay.
+	FakeBuilder renamed(16384);
+	renamed.Seed("custom_a", "system_a", 4096);
+	renamed.Seed("custom_b", "system_b", 4096);
+	CHECK(renamed.ResizePartition(renamed.AddPartition("my_product_b", "custom_b", 0), 1024));
+	renamed.Seed("unrelated", "keep", 1024);
+	CHECK(PlanFlashLayout(&renamed, "qti_b", "_b", "_a", 8192, {{"system", 6144}}, false, &info));
+	CHECK(!info.reuses_booted);
+	CHECK(renamed.groups.count("custom_b") == 0);
+	CHECK(renamed.groups.count("custom_a") == 1);
+	CHECK(renamed.groups.count("unrelated") == 1);
+	CHECK(renamed.partitions.at("system_b").group == "qti_b");
+	CHECK(renamed.partitions.count("my_product_b") == 0);
+	CHECK(renamed.partitions.count("system_a") == 1);
+	CHECK(info.available == 11264);  // 16384 - system_a - keep
+	auto released = info.released_target_partitions;
+	std::sort(released.begin(), released.end());
+	CHECK((released == std::vector<std::string>{"my_product_b", "system_b"}));
+	twrp::FlashReview shown;
+	shown.target_slot = "B";
+	shown.has_logical = true;
+	shown.space = info;
+	shown.space.replaced_group = "custom_b";
+	CHECK(twrp::RenderFlashReview(shown).find("Super group custom_b") != std::string::npos);
 	FakeBuilder small(8192);
 	small.Seed("rom_a", "system_a", 6144);
 	auto denied = small;

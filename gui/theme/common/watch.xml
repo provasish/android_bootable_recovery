@@ -5976,6 +5976,11 @@
 				<action function="set">tw_sideload_hs_decision=1</action>
 			</slider>
 
+			<!-- Runs once when the overlay opens; tells the waiting install the page exists. -->
+			<action>
+				<action function="set">tw_sideload_review_shown=1</action>
+			</action>
+
 			<action>
 				<touch key="back"/>
 				<action function="set">tw_sideload_hs_decision=2</action>

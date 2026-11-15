@@ -127,6 +127,7 @@ class SideloadReviewPage(unittest.TestCase):
     """
 
     DECISION = "tw_sideload_hs_decision"
+    SHOWN = "tw_sideload_review_shown=1"
 
     def check_theme(self, theme):
         root = ET.parse(ROOT / f"gui/theme/common/{theme}.xml").getroot()
@@ -136,14 +137,20 @@ class SideloadReviewPage(unittest.TestCase):
             function = action.get("function")
             if function is not None:
                 self.assertEqual(function, "set", f"{theme}: {ET.tostring(action)!r}")
-                self.assertTrue(action.text.startswith(self.DECISION + "="), action.text)
+                self.assertTrue(action.text.startswith(self.DECISION + "=") or action.text == self.SHOWN,
+                                action.text)
 
-        hooks = {}
+        hooks, on_open = {}, []
         for action in page.findall("action"):
-            touch = action.find("touch")
-            self.assertIsNotNone(touch, "page-level actions must be key hooks")
             self.assertEqual(action.findall("condition") + action.findall("conditions/condition"), [])
+            touch = action.find("touch")
+            if touch is None:
+                # Keyless, unconditional: runs when the overlay opens. It may
+                # only report that the page exists, never answer for the user.
+                on_open.append([a.text for a in action.findall('action[@function="set"]')])
+                continue
             hooks[touch.get("key")] = action.find('action[@function="set"]').text
+        self.assertEqual(on_open, [[self.SHOWN]])
         self.assertEqual(hooks, {"back": self.DECISION + "=2", "home": self.DECISION + "=2"})
 
         slider = page.find("slider")

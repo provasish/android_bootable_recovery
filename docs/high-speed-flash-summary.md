@@ -18,6 +18,14 @@ whether the booted ROM's Super space must be reused. It lists selected firmware
 and any physical partitions shared by both slots, plus read-back, ZIP
 signature, recovery-reflash, injection and reboot options as applicable.
 
+Like update_engine, the whole target slot is replaced: every Super group
+ending in the target suffix is dropped with its partitions, even when it
+carries another ROM's name (e.g. `realme_sm8250_mainline_dynpart_b` while
+the new ROM declares `qti_dynamic_partitions_b`). The summary then says
+which group is replaced. Their dm mappings are released before the new table
+is written. Groups of the booted slot are only touched with the overwrite
+opt-in.
+
 Space is computed by running the installer's actual layout algorithm against
 an in-memory liblp builder, including the overwrite opt-in. The layout routine
 returns before unmounting partitions, changing dm mappings or writing metadata
@@ -64,8 +72,10 @@ happens inside the install while adb waits:
 3. On confirm, the plan is built again and must match what was shown, then
    it installs as a reviewed plan: no fallback to update_engine.
 
-The page only sets `tw_sideload_hs_decision`; the waiting install thread
-reads it and returns to the sideload progress page. A theme without a
+The page is an overlay over the sideload progress page and only sets
+`tw_sideload_hs_decision`; the waiting install thread reads it and closes the
+overlay (re-entering action_page would re-run its `%tw_action%` entry action).
+When it opens, the page sets `tw_sideload_review_shown`; a theme without a
 `sideload_review` page makes the install stop instead of waiting. Sideload
 never reboots on its own, so the review always shows "Reboot after install:
 OFF". The payload is read over USB through the sideload FUSE file, so the
