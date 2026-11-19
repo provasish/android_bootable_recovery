@@ -21,9 +21,16 @@ inline std::string TrimOtaValue(const std::string& value) {
 inline bool CheckOtaDevice(const std::string& metadata, const std::string& aliases,
                            std::string* reason) {
 	std::set<std::string> allowed;
-	std::istringstream alias_stream(aliases);
+	// TARGET_OTA_ASSERT_DEVICE is written with ',' on some boards and '|' on
+	// others (installcommand.cpp accepts both). Normalize the board list too,
+	// not just the pre-device metadata, so either spelling works here as well.
+	std::string alias_list = aliases;
+	for (char& separator : alias_list)
+		if (separator == ',')
+			separator = '|';
+	std::istringstream alias_stream(alias_list);
 	std::string token;
-	while (std::getline(alias_stream, token, ',')) {
+	while (std::getline(alias_stream, token, '|')) {
 		token = TrimOtaValue(token);
 		if (!token.empty())
 			allowed.insert(token);

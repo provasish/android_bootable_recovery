@@ -980,6 +980,25 @@ int PageSet::SetOverlay(Page* page)
 	return 0;
 }
 
+int PageSet::RemoveOverlay(const std::string& name)
+{
+	for (std::vector<Page*>::iterator iter = mOverlays.begin(); iter != mOverlays.end(); ++iter) {
+		if ((*iter)->GetName() != name)
+			continue;
+		const bool was_top = (iter + 1 == mOverlays.end());
+		(*iter)->SetPageFocus(0);
+		mOverlays.erase(iter);
+		if (was_top) {
+			if (!mOverlays.empty())
+				mOverlays.back()->SetPageFocus(1);
+			else if (mCurrentPage)
+				mCurrentPage->SetPageFocus(1);
+		}
+		return 0;
+	}
+	return -1;
+}
+
 const ResourceManager* PageSet::GetResources()
 {
 	return mResources;
@@ -1564,6 +1583,11 @@ int PageManager::ChangeOverlay(std::string name)
 		Page* page = mCurrentSet ? mCurrentSet->FindPage(name) : NULL;
 		return mCurrentSet->SetOverlay(page);
 	}
+}
+
+int PageManager::RemoveOverlay(std::string name)
+{
+	return mCurrentSet ? mCurrentSet->RemoveOverlay(name) : -1;
 }
 
 const ResourceManager* PageManager::GetResources()

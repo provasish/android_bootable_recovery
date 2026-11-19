@@ -46,6 +46,18 @@ int main() {
 	Check("ota-type=AB\nota-type=AB\npre-device=spartan\n", false);
 	Check(std::string("ota-type=AB\npre-device=spartan") + '\0' + "other\n", false);
 	Check("ota-type=AB\npre-device=spartan\n", false, " , ");
+	// Recovery-side aliases may also be pipe-separated (the conventional
+	// TARGET_OTA_ASSERT_DEVICE spelling) or mix both separators.
+	Check("ota-type=AB\npre-device=RMX3371\n", true,
+	      "RMX3371|RE54E4L1|spartan");
+	Check("ota-type=AB\npre-device=RE54E4L1\n", true,
+	      "RMX3371 , RE54E4L1|spartan");
+	Check("ota-type=AB\npre-device=spartan\n", true,
+	      "RMX3371|RE54E4L1,spartan");
+	Check("ota-type=AB\npre-device=RMX3371_evil\n", false,
+	      "RMX3371|RE54E4L1|spartan");
+	Check("ota-type=AB\npre-device=spartan_evil\n", false,
+	      "RMX3371|RE54E4L1,spartan");
 	Check("", false);
 	std::cout << checks << " OTA device checks passed\n";
 }

@@ -1649,7 +1649,9 @@ static bool SideloadHighSpeedPrompt(const std::string& text, bool ready)
 	while ((decision = DataManager::GetIntValue("tw_sideload_hs_decision")) == 0)
 		usleep(100000);
 	DataManager::SetValue("tw_hs_review_ready", 0);
-	gui_changeOverlay("");
+	// Remove this overlay by name: a lock screen may have been pushed on top
+	// while we waited, and ChangeOverlay("") would pop that instead.
+	gui_removeOverlay("sideload_review");
 	return ready && decision == 1;
 }
 
@@ -1687,6 +1689,9 @@ int GUIAction::adbsideload(std::string arg __unused)
 		reinject_after_flash();
 		operation_end(ret);
 	}
+	// A process-global prompt must not leak into a later ORS sideload, which
+	// has no review page to drive it.
+	TW_Set_Sideload_Review_Prompt(nullptr);
 	return 0;
 }
 

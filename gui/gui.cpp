@@ -689,6 +689,14 @@ int gui_changeOverlay(std::string overlay)
 	return 0;
 }
 
+int gui_removeOverlay(std::string overlay)
+{
+	LOGINFO("Remove overlay: '%s'\n", overlay.c_str());
+	PageManager::RemoveOverlay(overlay);
+	gForceRender.set_value(1);
+	return 0;
+}
+
 std::string gui_parse_text(std::string str)
 {
 	// This function parses text for DataManager values encompassed by %value% in the XML

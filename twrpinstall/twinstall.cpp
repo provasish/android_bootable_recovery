@@ -664,6 +664,16 @@ bool ProbeHighSpeedPayload(const std::string& package_path, ZipArchiveHandle zip
 	uint64_t manifest_size = ReadBigEndian64(buf.data() + off);
 	off += kPayloadManifestSizeSize;
 
+	// The size comes from the payload header. Reject anything that cannot fit
+	// in payload.bin itself or in protobuf's int-sized ParseFromArray() before
+	// allocating a buffer for it (a corrupt zip could otherwise ask for GBs).
+	if (manifest_size == 0 || manifest_size > payload_entry.uncompressed_length ||
+	    manifest_size > static_cast<uint64_t>(INT_MAX) ||
+	    static_cast<uint64_t>(off) > payload_entry.uncompressed_length - manifest_size) {
+		HsWhy("payload manifest size is invalid");
+		return false;
+	}
+
 	if (off + kPayloadSignatureSizeSize > to_read) {
 		HsWhy("payload header is truncated");
 		return false;
@@ -987,8 +997,11 @@ bool ReviewSideloadHighSpeed(const std::string& package, ZipArchiveHandle zip, b
 		return true;
 	const TW_Sideload_Review_Prompt prompt = g_sideload_prompt.load();
 	if (!prompt) {
-		HsFail("no review screen for ADB sideload; nothing was written");
-		return false;
+		// A non-GUI sideload (OpenRecoveryScript, for example) has no page to
+		// show the review on. Nothing has been written yet, so fall back to the
+		// normal installer instead of failing the install outright.
+		HsSay("No on-device review screen for this sideload; using the normal installer.");
+		return true;  // *reviewed stays false: the caller must use the normal path
 	}
 	HsSay("High-speed flash: reading the install plan...");
 	twrp::FlashReview review;
@@ -1611,11 +1624,17 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 					}
 				}
 				gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
-				DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
-				if (reflashtwrp && ret_val == INSTALL_SUCCESS) {
+			}
+			// The review offers this option for high-speed installs as well.
+			// After a high-speed success the active slot has already switched,
+			// but ro.boot.slot_suffix still names the slot we booted from.
+			// Flash_Current_Twrp() copies that slot's running TWRP to the other
+			// slot -- exactly the one the payload just wrote.
+			DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
+			if (reflashtwrp && ret_val == INSTALL_SUCCESS) {
 				twrpRepacker repacker;
-				repacker.Flash_Current_Twrp();
-				}
+				if (!repacker.Flash_Current_Twrp())
+					LOGERR("Failed to reflash TWRP after install\n");
 			}
 		} else {
 			std::string binary_name("ui.xml");

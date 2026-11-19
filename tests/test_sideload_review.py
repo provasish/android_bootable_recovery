@@ -53,6 +53,10 @@ int gui_changeOverlay(std::string p) {
     if (p == "sideload_review" && g_has_page) { g_page = p; DataManager::SetValue("tw_sideload_review_shown", 1); }
     return 0;
 }
+int gui_removeOverlay(std::string p) {
+    if (p == "sideload_review" && g_page == "sideload_review") g_page = "action_page";
+    return 0;
+}
 int gui_changePage(std::string) { g_page_changes++; return 0; }
 #define LOGERR(...) fprintf(stderr, __VA_ARGS__)
 typedef void* ZipArchiveHandle; struct ZipEntry64 {};
@@ -75,8 +79,8 @@ static int fails = 0;
 
 // Runs the install side on a thread and answers like the GUI would.
 static bool run(const std::string& pkg, int answer, bool* reviewed) {
-    DataManager::SetValue("tw_sideload_hs_decision", 0);
-    g_build_calls = 0; g_page = "action_page";
+    // The real prompt must clear the previous decision itself; do not pre-clean here.
+    g_build_calls = 0; g_page = "action_page"; g_page_changes = 0;
     bool ok = false;
     std::thread t([&] { ok = ReviewSideloadHighSpeed(pkg, nullptr, reviewed); });
     if (answer) {
@@ -108,8 +112,9 @@ int main() {
     g_has_payload = false;
     CHECK(ReviewSideloadHighSpeed(sl, nullptr, &reviewed) && !reviewed);
     g_has_payload = true;
-    // No GUI hook registered: stop, nothing written.
-    CHECK(!ReviewSideloadHighSpeed(sl, nullptr, &reviewed) && !reviewed);
+    // No GUI hook registered (e.g. OpenRecoveryScript): fall back to the
+    // normal installer, with nothing written by high-speed.
+    CHECK(ReviewSideloadHighSpeed(sl, nullptr, &reviewed) && !reviewed);
     TW_Set_Sideload_Review_Prompt(SideloadHighSpeedPrompt);
     // Confirm with an unchanged plan.
     CHECK(run(sl, 1, &reviewed) && reviewed);

@@ -45,7 +45,8 @@ from modifying block devices concurrently with recovery.
 
 A reviewed install cannot fall back to update_engine because its partition or
 firmware choices could differ from the displayed plan. Automatic recovery
-reflash/reinjection runs only after a successful install. Normal flashing
+reflash runs only after a successful install; the pre-existing ADB sideload
+reinjection helper is still called on both success and failure. Normal flashing
 and OpenRecoveryScript retain their existing entry points; ADB sideload has
 its own reviewed flow (below). Review currently requires one
 ROM ZIP in the queue. Turn high-speed flashing off for a normal ZIP batch or
@@ -98,7 +99,7 @@ c++ -std=c++17 -Wall -Wextra -Werror \
 ```
 
 The Android build also exposes the `twrp_flash_review_test` host test target.
-Run the existing `twrp_ota_device_check_test` for OTA metadata checks.
+Run the `twrp_ota_device_check_test` host test target for OTA metadata checks.
 
 `python3 tests/test_flash_review_navigation.py` runs the actual GUIAction
 variable/key dispatch methods in a host harness against each stock review
