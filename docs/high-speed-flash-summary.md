@@ -100,6 +100,10 @@ c++ -std=c++17 -Wall -Wextra -Werror \
 
 The Android build also exposes the `twrp_flash_review_test` host test target.
 Run the `twrp_ota_device_check_test` host test target for OTA metadata checks.
+`tests/run_host_tests.sh` runs all four host tests in one command; it needs a
+C++ compiler (set `CXX` to pick one). The two Python harnesses stay manual by
+design: they read the real sources at runtime, which cannot be staged reliably
+in a `python_test_host` sandbox.
 
 `python3 tests/test_flash_review_navigation.py` runs the actual GUIAction
 variable/key dispatch methods in a host harness against each stock review
