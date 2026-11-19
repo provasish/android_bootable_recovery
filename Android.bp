@@ -30,6 +30,9 @@ license {
         "SPDX-license-identifier-Apache-2.0",
         "SPDX-license-identifier-MIT",
         "SPDX-license-identifier-OFL", // by exception only
+        // The high-speed flash files are GPL-3.0-or-later (ported from the
+        // OrangeFox fork) and carry that SPDX tag in their headers.
+        "SPDX-license-identifier-GPL-3.0-or-later",
     ],
     license_text: [
         "NOTICE",
