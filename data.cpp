@@ -582,11 +582,18 @@ void DataManager::SetDefaultValues()
 	mConst.SetValue(TW_VERSION_VAR, TW_VERSION_STR);
 
 #ifndef TW_NO_HAPTICS
-	// Short, light ticks: the aw8697 haptic motor buzzes noticeably at TWRP's
-	// stock 80/40/160 ms.
-	mPersist.SetValue("tw_button_vibrate", "15");
-	mPersist.SetValue("tw_keyboard_vibrate", "15");
-	mPersist.SetValue("tw_action_vibrate", "15");
+#ifdef TW_HAPTIC_DEFAULT_MS
+	// Device-specific tick length (BoardConfig.mk). Keep this opt-in so the
+	// recovery source doesn't retune haptics for every board that builds it.
+	const std::string haptic_default_ms = std::to_string(TW_HAPTIC_DEFAULT_MS);
+	mPersist.SetValue("tw_button_vibrate", haptic_default_ms);
+	mPersist.SetValue("tw_keyboard_vibrate", haptic_default_ms);
+	mPersist.SetValue("tw_action_vibrate", haptic_default_ms);
+#else
+	mPersist.SetValue("tw_button_vibrate", "80");
+	mPersist.SetValue("tw_keyboard_vibrate", "40");
+	mPersist.SetValue("tw_action_vibrate", "160");
+#endif
 	mConst.SetValue("tw_disable_haptics", "0");
 #else
 	LOGINFO("TW_NO_HAPTICS := true\n");
