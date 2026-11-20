@@ -3621,10 +3621,15 @@ bool TWPartitionManager::Prepare_All_Super_Volumes() {
 	return status;
 }
 
+// Retrofit A/B devices have one physical Super per slot; virtual A/B has a
+// single 'super' for any slot number. Deriving the device from the slot we
+// are actually reading/writing avoids mixing the two.
+static std::string Super_Partition_For_Slot(int slot_number) {
+	return "/dev/block/by-name/" + fs_mgr_get_super_partition_name(slot_number);
+}
+
 std::string TWPartitionManager::Get_Super_Partition() {
-	int slot_number = Get_Active_Slot_Display() == "A" ? 0 : 1;
-	std::string super_device = fs_mgr_get_super_partition_name(slot_number);
-	return "/dev/block/by-name/" + super_device;
+	return Super_Partition_For_Slot(Get_Active_Slot_Display() == "A" ? 0 : 1);
 }
 
 void TWPartitionManager::Setup_Super_Devices() {
@@ -3878,7 +3883,10 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	const uint32_t metadata_slot = android::fs_mgr::SlotNumberForSlotSuffix(slot_suffix);
 	const std::string source_suffix = (slot_suffix == "_b") ? "_a" : "_b";
 	const uint32_t source_metadata_slot = android::fs_mgr::SlotNumberForSlotSuffix(source_suffix);
-	const std::string super_device = Get_Super_Partition();
+	// Read the source table from the booted slot's Super and write the result
+	// to the target slot's Super. On virtual A/B both are the same device.
+	const std::string source_super = Super_Partition_For_Slot(source_metadata_slot);
+	const std::string target_super = Super_Partition_For_Slot(metadata_slot);
 
 	// Start from the BOOTED slot's copy of the table, like update_engine
 	// (MetadataBuilder::NewForUpdate reads the source slot). Each slot has its
@@ -3886,9 +3894,9 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	// as it was before the last flash -- laying out from it could place the
 	// new partitions on top of the running system. The result is written to
 	// the target slot's copy only.
-	auto builder = MetadataBuilder::New(super_device, source_metadata_slot);
+	auto builder = MetadataBuilder::New(source_super, source_metadata_slot);
 	if (!builder) {
-		LOGINFO("Unable to read logical partition metadata from '%s'\n", super_device.c_str());
+		LOGINFO("Unable to read logical partition metadata from '%s'\n", source_super.c_str());
 		gui_print_color("error", "  ERROR: Super layout: can't read the Super metadata\n");
 		return false;
 	}
@@ -4029,7 +4037,7 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		gui_print_color("warning", "  Reusing the current ROM's Super space; it will not boot until installation succeeds.\n");
 	}
 
-	if (!android::fs_mgr::UpdatePartitionTable(super_device, *updated, metadata_slot)) {
+	if (!android::fs_mgr::UpdatePartitionTable(target_super, *updated, metadata_slot)) {
 		LOGINFO("Failed to commit the rebuilt Super partition table\n");
 		gui_print_color("error", "  ERROR: Super layout: can't write the rebuilt metadata\n");
 		return false;
@@ -4038,7 +4046,7 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	for (auto& kv : partitions) {
 		std::string pname = kv.first + slot_suffix;
 		android::fs_mgr::CreateLogicalPartitionParams params = {
-			.block_device = super_device,
+			.block_device = target_super,
 			.metadata_slot = metadata_slot,
 			.partition_name = pname,
 			.force_writable = true,

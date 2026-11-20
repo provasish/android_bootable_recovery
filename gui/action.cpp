@@ -38,6 +38,7 @@
 
 #include <string>
 #include <sstream>
+#include <chrono>
 #include "../partitions.hpp"
 #include "../twrp-functions.hpp"
 #include "../twrpRepacker.hpp"
@@ -1118,8 +1119,12 @@ int GUIAction::reviewhighspeedflash(std::string arg __unused)
 		text = "High-speed flash is off. Go back to use the normal installer.";
 	else if (zip_queue_index != 1)
 		text = "Review one ROM ZIP at a time. Go back and clear the queue, or turn high-speed flash off for a ZIP batch. No partitions were changed.";
-	else
+	else {
+		// The review reads /metadata; the install path mounts it itself. Do
+		// the same here so users don't have to leave the flow to mount it.
+		PartitionManager.Mount_By_Path("/metadata", false);
 		ready = TW_Prepare_High_Speed_Flash_Review(zip_queue[0], &text);
+	}
 	DataManager::SetValue("tw_hs_review_text", text);
 	DataManager::SetValue("tw_hs_review_ready", ready ? 1 : 0);
 	operation_end(ready ? 0 : 1);
@@ -1650,9 +1655,20 @@ static bool SideloadHighSpeedPrompt(const std::string& text, bool ready)
 		LOGERR("This theme has no sideload_review page\n");
 		return false;
 	}
-	int decision;
-	while ((decision = DataManager::GetIntValue("tw_sideload_hs_decision")) == 0)
+	int decision = 0;
+	// Never hold the install thread forever: bound the wait and abort if the
+	// review page goes away without recording a decision.
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(10);
+	while ((decision = DataManager::GetIntValue("tw_sideload_hs_decision")) == 0) {
+		if (std::chrono::steady_clock::now() >= deadline ||
+		    DataManager::GetIntValue("tw_sideload_review_shown") != 1) {
+			LOGERR("Sideload review timed out or was dismissed; nothing was written\n");
+			decision = 2;  // treat as cancel
+			break;
+		}
 		usleep(100000);
+	}
+	DataManager::SetValue("tw_sideload_hs_decision", decision);
 	DataManager::SetValue("tw_hs_review_ready", 0);
 	// Remove this overlay by name: a lock screen may have been pushed on top
 	// while we waited, and ChangeOverlay("") would pop that instead.
