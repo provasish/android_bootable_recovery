@@ -1030,6 +1030,13 @@ void DataManager::SetDefaultValues()
 	else
 		mConst.SetValue("tw_has_repack_tools", "0");
 
+	// Flashlight: the device names its torch LEDs in system.prop
+	// (ro.twrp.flashlight.leds); see GUIAction::flashlight.
+	char flashlight_leds[PROPERTY_VALUE_MAX];
+	property_get("ro.twrp.flashlight.leds", flashlight_leds, "");
+	mConst.SetValue("tw_has_flashlight", flashlight_leds[0] ? "1" : "0");
+	mData.SetValue("tw_flashlight_on", "0");
+
 	pthread_mutex_unlock(&m_valuesLock);
 }
 

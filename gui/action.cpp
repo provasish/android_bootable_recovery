@@ -34,6 +34,7 @@
 #include <dirent.h>
 #include <private/android_filesystem_config.h>
 #include <android-base/properties.h>
+#include <android-base/strings.h>
 #include <fstream>
 
 #include <string>
@@ -208,6 +209,7 @@ GUIAction::GUIAction(xml_node<>* node)
 		ADD_ACTION(setlanguage);
 		ADD_ACTION(checkforapp);
 		ADD_ACTION(togglebacklight);
+		ADD_ACTION(flashlight);
 		ADD_ACTION(enableadb);
 		ADD_ACTION(enablefastboot);
 		ADD_ACTION(changeterminal);
@@ -2055,6 +2057,74 @@ int GUIAction::setlanguage(std::string arg __unused)
 	op_status = 0; // success
 
 	operation_end(op_status);
+	return 0;
+}
+
+// Flashlight, configured by the device's system.prop:
+//   ro.twrp.flashlight.leds   LEDs under /sys/class/leds that set the torch
+//                             current, comma-separated (e.g. led:torch_0,led:torch_1)
+//   ro.twrp.flashlight.switch optional LED that switches them on, as on
+//                             Qualcomm flash controllers (e.g. led:switch_2)
+//   ro.twrp.flashlight.level  torch brightness, default 100
+// Only plain LED names are accepted, so a property can't point the write
+// anywhere outside /sys/class/leds.
+static bool Flashlight_Led(const std::string& name, std::string* path) {
+	if (name.empty() || name.find('/') != std::string::npos || name.find("..") != std::string::npos)
+		return false;
+	*path = "/sys/class/leds/" + name + "/brightness";
+	return true;
+}
+
+// Unlike TWFunc::write_to_file, report the write itself: sysfs rejects a
+// value at write()/close(), not at open().
+static bool Flashlight_Write(const std::string& path, const std::string& value) {
+	int fd = open(path.c_str(), O_WRONLY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	bool ok = write(fd, value.c_str(), value.size()) == (ssize_t)value.size();
+	ok = (close(fd) == 0) && ok;
+	return ok;
+}
+
+int GUIAction::flashlight(std::string arg __unused)
+{
+	std::vector<std::string> torch_paths;
+	for (const auto& name : TWFunc::Split_String(android::base::GetProperty("ro.twrp.flashlight.leds", ""), ",")) {
+		std::string path;
+		if (!Flashlight_Led(android::base::Trim(name), &path)) {
+			LOGERR("Invalid flashlight LED '%s'\n", name.c_str());
+			return 0;
+		}
+		torch_paths.push_back(path);
+	}
+	std::string switch_path;
+	const std::string switch_name = android::base::Trim(android::base::GetProperty("ro.twrp.flashlight.switch", ""));
+	if (torch_paths.empty() || (!switch_name.empty() && !Flashlight_Led(switch_name, &switch_path))) {
+		LOGERR("Flashlight is not configured\n");
+		return 0;
+	}
+	std::string level = android::base::GetProperty("ro.twrp.flashlight.level", "100");
+	if (level.empty() || level.find_first_not_of("0123456789") != std::string::npos)
+		level = "100";
+
+	const bool turn_on = DataManager::GetIntValue("tw_flashlight_on") == 0;
+	bool ok = true;
+	if (turn_on) {
+		for (const auto& path : torch_paths)
+			ok = Flashlight_Write(path, level) && ok;
+		if (ok && !switch_path.empty())
+			ok = Flashlight_Write(switch_path, "255");
+	}
+	if (!turn_on || !ok) {
+		// Switch first, then the current; also the cleanup after a failure.
+		if (!switch_path.empty())
+			Flashlight_Write(switch_path, "0");
+		for (const auto& path : torch_paths)
+			Flashlight_Write(path, "0");
+	}
+	if (!ok)
+		gui_err("flashlight_failed=Unable to switch on the flashlight.");
+	DataManager::SetValue("tw_flashlight_on", (turn_on && ok) ? 1 : 0);
 	return 0;
 }
 

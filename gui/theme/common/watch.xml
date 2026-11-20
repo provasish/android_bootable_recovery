@@ -4428,6 +4428,10 @@
 				<listitem name="{@reload_theme_btn=Reload Theme}">
 					<action function="reload"/>
 				</listitem>
+				<listitem name="{@flashlight_btn=Flashlight on/off}">
+					<condition var1="tw_has_flashlight" var2="1"/>
+					<action function="flashlight"/>
+				</listitem>
 				<listitem name="{@part_sd_btn=Partition SD Card}">
 					<condition var1="tw_allow_partition_sdcard" var2="1"/>
 					<actions>
