@@ -87,7 +87,10 @@ The page is an overlay over the sideload progress page and only sets
 `tw_sideload_hs_decision`; the waiting install thread reads it and closes the
 overlay (re-entering action_page would re-run its `%tw_action%` entry action).
 When it opens, the page sets `tw_sideload_review_shown`; a theme without a
-`sideload_review` page makes the install stop instead of waiting. Sideload
+`sideload_review` page makes the install stop instead of waiting. A sideload
+with no review screen at all (OpenRecoveryScript) uses the normal installer
+even with the toggle on: a sideload is never high-speed flashed unreviewed.
+The wait is capped at 10 minutes and then counts as Cancel. Sideload
 never reboots on its own, so the review always shows "Reboot after install:
 OFF". The payload is read over USB through the sideload FUSE file, so the
 transfer usually limits the speed; installing from storage is faster.

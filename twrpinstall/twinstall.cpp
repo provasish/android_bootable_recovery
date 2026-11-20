@@ -316,6 +316,14 @@ bool HighSpeedEnabledFor(const std::string& package) {
 	                                                            : "tw_high_speed_flash") != 0;
 }
 
+// A sideload is only ever high-speed flashed after its on-device review was
+// confirmed. Without a review screen (OpenRecoveryScript) it must take the
+// normal installer even with the sideload toggle on: the unreviewed path
+// could otherwise reuse the booted ROM's Super space nobody agreed to.
+bool HighSpeedAllowedWithoutReview(const std::string& package) {
+	return !IsSideloadPackage(package);
+}
+
 // Set by the GUI; shows a sideload review and blocks until confirm/cancel.
 std::atomic<TW_Sideload_Review_Prompt> g_sideload_prompt{nullptr};
 
@@ -1613,7 +1621,9 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		ZipEntry64 ab_binary_entry;
 		if (FindEntry(Zip, ab_binary_name, &ab_binary_entry) == 0) {
 			LOGINFO("AB zip\n");
-			HighSpeedResult hs_res = TryHighSpeedAbInstall(path, Zip, !reviewed_install);
+			HighSpeedResult hs_res = (reviewed_install || HighSpeedAllowedWithoutReview(path))
+				? TryHighSpeedAbInstall(path, Zip, !reviewed_install)
+				: HighSpeedResult::kNotApplicable;
 			if (hs_res == HighSpeedResult::kAborted ||
 			    (reviewed_install && hs_res != HighSpeedResult::kSucceeded)) {
 				// nothing past this point may run: the target slot can be

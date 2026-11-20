@@ -721,9 +721,12 @@ int GUIAction::copylog(std::string arg __unused)
 			int status = 0;
 			// Bound the wait: a stuck script would otherwise hold tw_busy with
 			// no way to cancel. Wait_For_Child_Timeout only checks signals, so
-			// also verify a normal, successful exit here.
+			// also verify a normal, successful exit here. The device script
+			// gives each of its 7 collectors up to 15 s (105 s worst case), so
+			// leave room for that plus the copies instead of killing a slow
+			// but working export.
 			int wait_rc = pid < 0 ? -1 :
-				TWFunc::Wait_For_Child_Timeout(pid, &status, "recovery diagnostics", 60);
+				TWFunc::Wait_For_Child_Timeout(pid, &status, "recovery diagnostics", 150);
 			if (wait_rc != 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 				gui_err("diagnostics_failed=Unable to export diagnostics. Recovery log was saved.");
 				operation_end(1);

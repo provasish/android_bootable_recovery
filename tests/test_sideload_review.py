@@ -26,6 +26,14 @@ setter = tw[tw.index('void TW_Set_Sideload_Review_Prompt'):]
 setter = setter[:setter.index('\n}\n') + 3]
 prompt = block(act, '// Runs on the sideload install thread', 'int GUIAction::adbsideload')
 
+# TWinstall_zip itself needs the whole recovery, so check its dispatch here:
+# an unreviewed sideload must never reach TryHighSpeedAbInstall.
+calls = [line.strip() for line in tw.split('\n') if 'TryHighSpeedAbInstall(path' in line]
+gate = 'HighSpeedResult hs_res = (reviewed_install || HighSpeedAllowedWithoutReview(path))'
+if len(calls) != 1 or gate not in tw:
+    print('TWinstall_zip must gate TryHighSpeedAbInstall on review:', calls)
+    sys.exit(1)
+
 harness = r'''
 #include <atomic>
 #include <chrono>
@@ -115,6 +123,9 @@ int main() {
     // No GUI hook registered (e.g. OpenRecoveryScript): fall back to the
     // normal installer, with nothing written by high-speed.
     CHECK(ReviewSideloadHighSpeed(sl, nullptr, &reviewed) && !reviewed);
+    // ...and the dispatcher must not then run high-speed unreviewed.
+    CHECK(!HighSpeedAllowedWithoutReview(sl));
+    CHECK(HighSpeedAllowedWithoutReview("/sdcard/rom.zip"));
     TW_Set_Sideload_Review_Prompt(SideloadHighSpeedPrompt);
     // Confirm with an unchanged plan.
     CHECK(run(sl, 1, &reviewed) && reviewed);
