@@ -762,7 +762,13 @@ void DataManager::SetDefaultValues()
 	mPersist.SetValue(TW_DISABLE_FREE_SPACE_VAR, "0");
 	mPersist.SetValue(TW_FORCE_DIGEST_CHECK_VAR, "0");
 	mPersist.SetValue(TW_USE_COMPRESSION_VAR, "0");
+#ifdef TW_DEFAULT_TIMEZONE_IST
+	// India Standard Time (UTC+5:30, no DST); the Time Zone page shows it as
+	// "(UTC +5)" with offset 30 and DST off (values set below).
+	mPersist.SetValue(TW_TIME_ZONE_VAR, "IST-5:30");
+#else
 	mPersist.SetValue(TW_TIME_ZONE_VAR, "CST6CDT,M3.2.0,M11.1.0");
+#endif
 	mPersist.SetValue(TW_GUI_SORT_ORDER, "1");
 	mPersist.SetValue(TW_RM_RF_VAR, "0");
 	mPersist.SetValue(TW_SKIP_DIGEST_CHECK_VAR, "0");
@@ -771,10 +777,27 @@ void DataManager::SetDefaultValues()
 	mPersist.SetValue(TW_SDEXT_SIZE, "0");
 	mPersist.SetValue(TW_SWAP_SIZE, "0");
 	mPersist.SetValue(TW_SDPART_FILE_SYSTEM, "ext3");
+#ifdef TW_DEFAULT_TIMEZONE_IST
+	mPersist.SetValue(TW_TIME_ZONE_GUISEL, "PAKST-5;PAKDT");
+	mPersist.SetValue(TW_TIME_ZONE_GUIOFFSET, "30");
+	mPersist.SetValue(TW_TIME_ZONE_GUIDST, "0");
+#else
 	mPersist.SetValue(TW_TIME_ZONE_GUISEL, "CST6;CDT,M3.2.0,M11.1.0");
 	mPersist.SetValue(TW_TIME_ZONE_GUIOFFSET, "0");
 	mPersist.SetValue(TW_TIME_ZONE_GUIDST, "1");
+#endif
+#ifdef TW_DEFAULT_REFLASH_TWRP
+	// A/B devices with a recovery partition: a ROM that ships its own
+	// recovery would otherwise replace TWRP on the slot it installs to.
+	mPersist.SetValue(TW_AUTO_REFLASHTWRP_VAR, "1");
+#else
 	mPersist.SetValue(TW_AUTO_REFLASHTWRP_VAR, "0");
+#endif
+#ifdef TW_REFUSE_ZIPS_AFTER_AB_ROM
+	mConst.SetValue("tw_refuse_zips_after_ab_rom", "1");
+#else
+	mConst.SetValue("tw_refuse_zips_after_ab_rom", "0");
+#endif
 #ifdef TW_NO_FLASH_CURRENT_TWRP
 	mConst.SetValue("tw_no_flash_current_twrp", "1");
 #else

@@ -741,7 +741,7 @@ void TWPartition::Setup_Data_Partition(bool Display_Error) {
 		char crypto_state[255];
 		property_get("ro.crypto.state", crypto_state, "error");
 		if (!Decrypt_FBE_DE() && strcmp(crypto_state, "error") != 0) {
-			if (is_device_fbe == 1)
+			if (is_device_fbe == 1 && !android::base::GetBoolProperty("twrp.fbe.decrypt_skipped", false))
 				LOGERR("Unable to decrypt FBE device\n");
 		} else {
 			DataManager::SetValue(TW_IS_ENCRYPTED, 0);
@@ -777,6 +777,29 @@ void TWPartition::Set_FBE_Status() {
 	}
 }
 
+// TW_SKIP_FBE_DECRYPTION_SDKVERSION (BoardConfig.mk): the first Android SDK
+// level this recovery's keystore/keymaster stack must not decrypt. Using an
+// older stack on a newer ROM's keys risks upgrading or rewriting key blobs that
+// Android then can't use. Data stays encrypted instead; an unreadable SDK level
+// decrypts as usual.
+bool TWPartition::Skip_FBE_Decryption_For_Rom_Sdk() {
+#ifdef TW_SKIP_FBE_DECRYPTION_SDKVERSION
+	std::string sdk = TWFunc::System_Property_Get("ro.build.version.sdk");
+	if (sdk.empty())
+		sdk = TWFunc::System_Property_Get("ro.system.build.version.sdk");
+	const int rom_sdk = atoi(sdk.c_str());
+	if (rom_sdk <= 0 || rom_sdk < TW_SKIP_FBE_DECRYPTION_SDKVERSION)
+		return false;
+	gui_print_color("warning", "Installed ROM is Android SDK %d; this TWRP decrypts up to SDK %d.\n"
+		"Data stays encrypted so its keys are not touched. Internal storage is unavailable.\n",
+		rom_sdk, TW_SKIP_FBE_DECRYPTION_SDKVERSION - 1);
+	android::base::SetProperty("twrp.fbe.decrypt_skipped", "1");
+	return true;
+#else
+	return false;
+#endif
+}
+
 bool TWPartition::Decrypt_FBE_DE() {
 	if (TWFunc::Path_Exists("/data/unencrypted/key/version")) {
 		DataManager::SetValue(TW_IS_FBE, 1);
@@ -802,6 +825,9 @@ bool TWPartition::Decrypt_FBE_DE() {
 	ExcludeAll(Mount_Point + "/cache");
 	ExcludeAll(Mount_Point + "/per_boot"); // removed each boot by init
 	ExcludeAll(Mount_Point + "/gsi"); // cow devices
+
+	if (Skip_FBE_Decryption_For_Rom_Sdk())
+		return false;
 
 	int retry_count = 3;
 	while (!android::keystore::Decrypt_DE() && --retry_count)
@@ -1561,8 +1587,11 @@ bool TWPartition::Is_Mounted(void) {
 	test_path = Mount_Point + "/../.";
 	if (stat(test_path.c_str(), &st2) != 0)  return false;
 
-        // Check to see if a symlink mount point exists and is mounted
-        if (!Symlink_Mount_Point.empty()) {
+        // Check to see if a symlink mount point exists and is mounted.
+        // Only for a /data without data/media: with data/media the symlink
+        // mount point is the /sdcard bind mount, which can outlive /data and
+        // would report an unmounted /data as mounted (from PitchBlack).
+        if (!Symlink_Mount_Point.empty() && Mount_Point == "/data" && !Has_Data_Media) {
             scan_mounted_volumes();
             const MountedVolume * sml = find_mounted_volume_by_mount_point(Symlink_Mount_Point.c_str());
             if (sml != nullptr) {

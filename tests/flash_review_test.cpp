@@ -196,6 +196,15 @@ static void TestConsentAndText() {
 	text = twrp::RenderFlashReview(review);
 	CHECK(text.find("WILL BE REUSED") != std::string::npos);
 	CHECK(text.find("will be preserved") == std::string::npos);
+	CHECK(text.find("REPLACES TWRP") == std::string::npos);  // payload without recovery
+	review.replaces_recovery = true;
+	text = twrp::RenderFlashReview(review);
+	CHECK(text.find("THIS ROM REPLACES TWRP ON SLOT B") != std::string::npos);
+	review.reflash_recovery = true;
+	text = twrp::RenderFlashReview(review);
+	CHECK(text.find("REPLACES TWRP") == std::string::npos);
+	CHECK(text.find("TWRP is copied back over it on slot B") != std::string::npos);
+	review.replaces_recovery = false; review.reflash_recovery = false;
 	review.has_logical = false; review.firmware.clear(); review.skipped_firmware = 22;
 	text = twrp::RenderFlashReview(review);
 	CHECK(text.find("no logical partitions") != std::string::npos);

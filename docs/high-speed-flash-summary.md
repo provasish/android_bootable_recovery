@@ -52,6 +52,16 @@ its own reviewed flow (below). Review currently requires one
 ROM ZIP in the queue. Turn high-speed flashing off for a normal ZIP batch or
 for a package that requires the normal installer.
 
+When the payload carries its own `recovery` image, the summary says so: with
+**Reflash recovery after ROM** off it warns that the ROM replaces TWRP on the
+target slot; with it on, TWRP is copied back afterwards
+(`TW_DEFAULT_REFLASH_TWRP := true` makes ON the default).
+
+With `TW_REFUSE_ZIPS_AFTER_AB_ROM := true`, any further ZIP is refused after an
+A/B ROM installed successfully (high-speed or update_engine) until recovery is
+rebooted: TWRP still has the old slot mounted, so root, GApps or kernel ZIPs
+would patch the old ROM.
+
 The target slot's Super table is committed before the extractor starts, so the
 installer remembers the previous table and, if anything fails before the
 extractor runs (metadata write, dm mapping, starting the extractor), writes the

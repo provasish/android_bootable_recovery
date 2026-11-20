@@ -893,6 +893,9 @@ bool BuildHighSpeedReview(const std::string& package, ZipArchiveHandle zip,
 		return false;
 	}
 	review->skipped_firmware = skipped.size();
+	for (const auto& part : plan)
+		if (part.name == "recovery")
+			review->replaces_recovery = true;  // part of the binding via the plan's names below
 	review->file = TWFunc::Get_Filename(package);
 	// Prevent line/control characters and variable delimiters in filenames
 	// from being interpreted as extra summary content by the GUI textbox.
@@ -1527,10 +1530,19 @@ bool TW_Confirm_High_Speed_Flash_Review(const std::string& path) {
 	return g_review_consent.Confirm(path);
 }
 
+// Set once an A/B ROM installed successfully in this recovery session. The
+// ROM went to the other slot, while TWRP keeps the booted slot's mappings, so
+// a ZIP flashed now (root, GApps, kernel) would patch the old ROM instead.
+static bool g_ab_rom_installed = false;
+
 int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	int ret_val, zip_verify = 1, unmount_system = 1, reflashtwrp = 0;
 
 	gui_msg(Msg("installing_zip=Installing zip file '{1}'")(path));
+	if (g_ab_rom_installed && DataManager::GetIntValue("tw_refuse_zips_after_ab_rom") != 0) {
+		gui_err("ab_rom_reboot_first=An A/B ROM was installed in this session. Reboot to recovery before flashing more ZIPs, or they go to the old slot.");
+		return INSTALL_ERROR;
+	}
 	if (strlen(path) < 9 || strncmp(path, "/sideload", 9) != 0) {
 		string digest_str;
 		string Full_Filename = path;
@@ -1667,6 +1679,8 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 				if (!repacker.Flash_Current_Twrp())
 					LOGERR("Failed to reflash TWRP after install\n");
 			}
+			if (ret_val == INSTALL_SUCCESS)
+				g_ab_rom_installed = true;
 		} else {
 			std::string binary_name("ui.xml");
 			ZipEntry64 binary_entry;
@@ -1682,6 +1696,9 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	int total_time = (int) difftime(stop, start);
 	if (ret_val == INSTALL_CORRUPT) {
 		gui_err("invalid_zip_format=Invalid zip file format!");
+	} else if (ret_val == INSTALL_SUCCESS) {
+		// Shown on screen, not only in the log (from PitchBlack).
+		gui_msg(Msg("install_took=Install took {1}m {2}s.")(total_time / 60)(total_time % 60));
 	} else {
 		LOGINFO("Install took %i second(s).\n", total_time);
 	}

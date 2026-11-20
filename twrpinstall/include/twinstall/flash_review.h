@@ -132,6 +132,7 @@ struct FlashReview {
 	bool inject_recovery = false;
 	bool reboot_after = false;
 	bool overwrite_allowed = false;
+	bool replaces_recovery = false;  // the payload carries its own recovery image
 	std::vector<std::string> firmware;
 	std::vector<std::string> shared;
 	size_t skipped_firmware = 0;
@@ -165,6 +166,12 @@ inline std::string RenderFlashReview(const FlashReview& review) {
 	    << "\nFirmware read-back: always ON when firmware is flashed.\n"
 	    << "ZIP signature verification: " << (review.verify_signature ? "ON" : "OFF")
 	    << "\nReflash recovery after ROM: " << (review.reflash_recovery ? "ON" : "OFF") << '\n';
+	if (review.replaces_recovery && review.reflash_recovery)
+		out << "This ROM ships its own recovery; TWRP is copied back over it on slot "
+		    << review.target_slot << " afterwards.\n";
+	else if (review.replaces_recovery)
+		out << "\nTHIS ROM REPLACES TWRP ON SLOT " << review.target_slot << ".\n"
+		    << "Turn on Reflash recovery after ROM to keep TWRP there.\n\n";
 	if (review.inject_recovery)
 		out << "Inject TWRP after install: ON\n";
 	out << "Reboot after install: " << (review.reboot_after ? "ON" : "OFF") << "\n\n";

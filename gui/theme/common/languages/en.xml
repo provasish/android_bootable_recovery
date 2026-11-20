@@ -526,6 +526,9 @@
 		<string name="backup_storage_undecrypt_warning">Backup will not include some files of user {1}, because the user is not decrypted.</string>
 		<string name="decrypting_user_fbe">Attempting to decrypt FBE for user {1}...</string>
 		<string name="decrypt_user_success_fbe">User {1} Decrypted Successfully</string>
+		<string name="decrypt_skipped_sdk">Decryption is disabled for this Android version; nothing was changed.</string>
+		<string name="ab_rom_reboot_first">An A/B ROM was installed in this session. Reboot to recovery before flashing more ZIPs, or they go to the old slot.</string>
+		<string name="install_took">Install took {1}m {2}s.</string>
 		<string name="decrypt_user_fail_fbe">Failed to decrypt user {1}</string>
 		<string name="decrypt_data_enter_pass_fbe">Enter Password for User [%tw_crypto_user_id%]</string>
 		<string name="decrypt_data_enter_pattern_fbe">Enter Pattern for User [%tw_crypto_user_id%]</string>

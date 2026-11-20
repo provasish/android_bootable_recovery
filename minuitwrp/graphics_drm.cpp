@@ -52,6 +52,7 @@
 #include <unistd.h>
 
 #include <string>
+#include <cutils/properties.h>
 #include <drm_fourcc.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -636,6 +637,38 @@ static drmModeConnector *find_main_monitor(int fd, drmModeRes *resources,
             *mode_index = modes;
             break;
         }
+    }
+
+    /*
+     * ro.twrp.drm.prefer_60hz=true (device system.prop): the preferred mode
+     * is often the panel's fastest (120 Hz), but TWRP draws at most
+     * TW_FRAMERATE (30-60) frames per second. On command-mode panels a frame
+     * transfer then takes most of the refresh period (about 7.5 of 8.3 ms at
+     * 120 Hz) and frames tear while scrolling. Use the slowest mode with the
+     * same resolution that still runs at 60 Hz or more. A runtime property
+     * because this library's cflags come from vendor/twrp's Soong variables.
+     */
+    if (property_get_bool("ro.twrp.drm.prefer_60hz", false)) {
+        const drmModeModeInfo &pref = main_monitor_connector->modes[*mode_index];
+        int match = -1;
+        for (int m = 0; m < main_monitor_connector->count_modes; m++) {
+            const drmModeModeInfo &mi = main_monitor_connector->modes[m];
+            printf("drm: mode %d: %dx%d@%d%s\n", m, (int)mi.hdisplay,
+                   (int)mi.vdisplay, (int)mi.vrefresh,
+                   m == (int)*mode_index ? " (preferred)" : "");
+            if (mi.hdisplay != pref.hdisplay || mi.vdisplay != pref.vdisplay ||
+                    mi.vrefresh < 60)
+                continue;
+            if (match < 0 ||
+                    mi.vrefresh < main_monitor_connector->modes[match].vrefresh)
+                match = m;
+        }
+        if (match >= 0 && match != (int)*mode_index &&
+                main_monitor_connector->modes[match].vrefresh < pref.vrefresh)
+            *mode_index = match;
+        const drmModeModeInfo &sel = main_monitor_connector->modes[*mode_index];
+        printf("drm: selected mode %u: %dx%d@%d\n", *mode_index,
+               (int)sel.hdisplay, (int)sel.vdisplay, (int)sel.vrefresh);
     }
 
     return main_monitor_connector;
