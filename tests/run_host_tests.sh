@@ -36,6 +36,11 @@ echo "=== Flash review layout/consent ==="
     -I . -I twrpinstall/include tests/flash_review_test.cpp -o "$tmp/flash_review"
 "$tmp/flash_review"
 
+echo "=== Super rollback guard ==="
+"$CXX_BIN" -std=c++17 -Wall -Wextra -Werror \
+    -I twrpinstall/include tests/super_rollback_test.cpp -o "$tmp/super_rollback"
+"$tmp/super_rollback"
+
 echo "=== Theme navigation ==="
 python3 tests/test_flash_review_navigation.py
 

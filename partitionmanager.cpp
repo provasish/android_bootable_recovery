@@ -4012,6 +4012,20 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 	if (preview_only)
 		return true;
 
+	// From here on the target slot's copy of the table changes. Remember what
+	// it takes to put the previous layout back: Rollback_High_Speed_Super runs
+	// if the install stops before it writes any image (see twinstall.cpp).
+	Clear_High_Speed_Super_Rollback();
+	high_speed_rollback_target_super = target_super;
+	high_speed_rollback_source_super = source_super;
+	high_speed_rollback_source_suffix = source_suffix;
+	high_speed_rollback_target_slot = metadata_slot;
+	high_speed_rollback_source_slot = source_metadata_slot;
+	high_speed_rollback_table = android::fs_mgr::ReadMetadata(target_super, metadata_slot);
+	for (const auto& kv : partitions)
+		high_speed_rollback_new_partitions.push_back(kv.first + slot_suffix);
+	high_speed_rollback_armed = true;
+
 	// The same in-memory plan passed. Only now release mappings and write it.
 	for (const auto& kv : partitions)
 		DestroyLogicalPartition(kv.first + slot_suffix);
@@ -4094,4 +4108,91 @@ bool TWPartitionManager::Rebuild_Logical_Group_For_High_Speed_Flash(
 		group_name.c_str(), partitions.size(),
 		(unsigned long long)space_info->required, (unsigned long long)group_max_size);
 	return true;
+}
+
+// Map one logical partition, reusing the device when it is already mapped.
+static bool Map_Super_Partition(const std::string& super_device, uint32_t metadata_slot,
+		const std::string& partition_name, std::string* mapped_path) {
+	const std::string existing = "/dev/block/mapper/" + partition_name;
+	if (access(existing.c_str(), F_OK) == 0) {
+		*mapped_path = existing;
+		return true;
+	}
+	android::fs_mgr::CreateLogicalPartitionParams params = {
+		.block_device = super_device,
+		.metadata_slot = metadata_slot,
+		.partition_name = partition_name,
+		.force_writable = true,
+		.timeout_ms = std::chrono::seconds(5),
+	};
+	return android::fs_mgr::CreateLogicalPartition(params, mapped_path);
+}
+
+// Undo the Super changes of a high-speed install that stopped before writing
+// any image. Everything this has to reverse (the table commit and the mapping
+// changes) happens before the extractor starts, so the previous layout can be
+// restored exactly: nothing in the target slot has been overwritten yet.
+//
+// The booted slot's table is never written, but its dm devices are released
+// when the plan reuses its space, so they are re-created from that table.
+bool TWPartitionManager::Rollback_High_Speed_Super() {
+	if (!high_speed_rollback_armed)
+		return true;
+	high_speed_rollback_armed = false;
+	bool ok = true;
+
+	LOGINFO("high-speed: install stopped before writing; restoring the previous Super layout\n");
+	gui_print_color("warning", "  Restoring the previous Super layout...\n");
+
+	// The failed plan's devices are mapped from the table that is about to go
+	// away.
+	for (const auto& name : high_speed_rollback_new_partitions) {
+		if (!DestroyLogicalPartition(name))
+			LOGINFO("high-speed: '%s' had no mapping to release\n", name.c_str());
+	}
+
+	if (high_speed_rollback_table) {
+		if (!android::fs_mgr::UpdatePartitionTable(high_speed_rollback_target_super,
+				*high_speed_rollback_table, high_speed_rollback_target_slot)) {
+			LOGERR("high-speed: could not restore the target slot's Super table\n");
+			ok = false;
+		}
+	} else {
+		LOGINFO("high-speed: the target slot had no readable Super table to restore\n");
+	}
+
+	// Point TWRP's entries back at the current slot. This also re-creates the
+	// devices that were released for reuse.
+	for (auto* part : Partitions) {
+		if (!part->Is_Super)
+			continue;
+		const std::string bare = Get_Bare_Partition_Name(part->Get_Mount_Point());
+		std::string mapped_path;
+		if (Map_Super_Partition(high_speed_rollback_source_super,
+				high_speed_rollback_source_slot, bare + high_speed_rollback_source_suffix,
+				&mapped_path)) {
+			part->Set_Block_Device(mapped_path);
+		} else {
+			part->Set_Block_Device("");
+		}
+	}
+
+	Clear_High_Speed_Super_Rollback();
+	if (!ok) {
+		gui_print_color("error", "  ERROR: the previous Super layout may be incomplete; reflash the ROM\n");
+		return false;
+	}
+	gui_print_color("normal", "  Previous Super layout restored; nothing was written to the target slot.\n");
+	return true;
+}
+
+void TWPartitionManager::Clear_High_Speed_Super_Rollback() {
+	high_speed_rollback_armed = false;
+	high_speed_rollback_target_super.clear();
+	high_speed_rollback_source_super.clear();
+	high_speed_rollback_source_suffix.clear();
+	high_speed_rollback_target_slot = 0;
+	high_speed_rollback_source_slot = 0;
+	high_speed_rollback_table.reset();
+	high_speed_rollback_new_partitions.clear();
 }

@@ -30,7 +30,7 @@ Space is computed by running the installer's actual layout algorithm against
 an in-memory liblp builder, including the overwrite opt-in. The layout routine
 returns before unmounting partitions, changing dm mappings or writing metadata
 in preview mode. Preview never cancels snapshot updates. With virtual A/B,
-Metadata must already be mounted so its update state can be read; active
+review mounts `/metadata` itself so the update state can be read; active
 snapshot updates block review until resolved in Android.
 
 The installer verifies the ZIP signature/digest according to the selected
@@ -51,6 +51,16 @@ and OpenRecoveryScript retain their existing entry points; ADB sideload has
 its own reviewed flow (below). Review currently requires one
 ROM ZIP in the queue. Turn high-speed flashing off for a normal ZIP batch or
 for a package that requires the normal installer.
+
+The target slot's Super table is committed before the extractor starts, so the
+installer remembers the previous table and, if anything fails before the
+extractor runs (metadata write, dm mapping, starting the extractor), writes the
+old table back and re-creates the booted slot's mappings. That window is safe
+to undo because no image has been written yet. Once the extractor may have
+written, the new table is kept instead: it matches what is on the device, while
+the old table would describe extents that no longer hold that data. On virtual
+A/B it is straightforward: the booted slot's metadata copy is never written.
+On retrofit A/B each read/write uses its own slot's Super device.
 
 Portrait, landscape and watch stock themes include the review page. Textboxes
 now split expanded multiline values into logical lines before word wrapping
@@ -100,7 +110,9 @@ c++ -std=c++17 -Wall -Wextra -Werror \
 
 The Android build also exposes the `twrp_flash_review_test` host test target.
 Run the `twrp_ota_device_check_test` host test target for OTA metadata checks.
-`tests/run_host_tests.sh` runs all four host tests in one command; it needs a
+`twrp_super_rollback_test` checks that the rollback guard restores the previous
+layout on an early failure and keeps the new one once writing may have started.
+`tests/run_host_tests.sh` runs all five host tests in one command; it needs a
 C++ compiler (set `CXX` to pick one). The two Python harnesses stay manual by
 design: they read the real sources at runtime, which cannot be staged reliably
 in a `python_test_host` sandbox.

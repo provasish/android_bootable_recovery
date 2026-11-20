@@ -64,6 +64,7 @@
 #include "twinstall/ota_device_check.h"
 #include "twinstall/flash_review.h"
 #include "twinstall/flash_review_api.h"
+#include "twinstall/super_rollback.h"
 #include "variables.h"
 #include "data.hpp"
 #include "partitions.hpp"
@@ -1050,6 +1051,17 @@ static HighSpeedResult HsUnsupported(const std::string& why, bool allow_fallback
 }
 
 static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArchiveHandle zip, bool allow_fallback) {
+	// Sink for twrp::SuperRollbackGuard: undo/forget the target slot's new
+	// Super layout after a failure that happened before any image was written.
+	struct SuperRollbackSink {
+		void Rollback() { PartitionManager.Rollback_High_Speed_Super(); }
+		void Clear() { PartitionManager.Clear_High_Speed_Super_Rollback(); }
+	};
+	SuperRollbackSink super_sink;
+	// Armed before the commit so a failure inside the rebuild itself (partial
+	// metadata write, a mapping that can't be created) is undone too.
+	twrp::SuperRollbackGuard<SuperRollbackSink> super_rollback(super_sink);
+
 	if (!HighSpeedEnabledFor(package))
 		return HighSpeedResult::kNotApplicable;
 
@@ -1384,6 +1396,15 @@ static HighSpeedResult TryHighSpeedAbInstall(const std::string& package, ZipArch
 	do {
 		waited = waitpid(pid, &status, 0);
 	} while (waited < 0 && errno == EINTR);
+
+	// 127 is the child's _exit() when execv() failed, so the extractor never
+	// ran and no image was touched -- the saved layout can still be restored
+	// exactly. Anything else may have written data, and then the new table is
+	// the one that matches what is on the device.
+	const bool extractor_never_ran =
+		waited == pid && WIFEXITED(status) && WEXITSTATUS(status) == 127;
+	if (!extractor_never_ran)
+		super_rollback.Keep();
 
 	// --- Check 1: exit status and signals (the authoritative result) ---
 	if (WIFSIGNALED(status)) {

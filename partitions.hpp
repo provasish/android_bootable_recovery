@@ -20,6 +20,8 @@
 #define __TWRP_Partition_Manager
 
 #include <map>
+#include <memory>
+#include <cstdint>
 #include <vector>
 #include <string>
 #include <sys/poll.h>
@@ -38,6 +40,14 @@
 #define REPACK_NEW_DIR "/tmp/repacknew/"
 
 #define NOT_AVAILABLE -2
+
+// Forward declaration: only high-speed rollback state keeps an exported Super
+// table, and partitions.hpp must not pull in liblp's headers.
+namespace android {
+namespace fs_mgr {
+struct LpMetadata;
+}
+}
 
 using namespace std;
 
@@ -418,6 +428,8 @@ public:
 		bool allow_overwrite_booted,
 		std::map<std::string, std::string>* mapped_paths,
 		bool preview_only = false, twrp::FlashSpaceInfo* space_info = nullptr); // Preview is in memory only; never unmaps or writes
+	bool Rollback_High_Speed_Super();                                         // Put the previous Super layout back after a failed high-speed install
+	void Clear_High_Speed_Super_Rollback();                                   // Forget the saved Super layout (install succeeded or writes started)
 
 private:
 	void Setup_Settings_Storage_Partition(TWPartition* Part);                 // Sets up settings storage
@@ -446,6 +458,18 @@ private:
 	string Active_Slot_Display;                                               // Current Active Slot (A or B) for display purposes
 	std::vector<users_struct> Users_List;                                     // List of FBE users
 	std::vector<std::string> Super_Partition_List;                            // Display value for super partitions
+
+	// State saved by Rebuild_Logical_Group_For_High_Speed_Flash just before it
+	// replaces the target slot's table, so an install that fails before the
+	// first write can put the device back the way it was.
+	bool high_speed_rollback_armed = false;
+	std::string high_speed_rollback_target_super;
+	std::string high_speed_rollback_source_super;
+	std::string high_speed_rollback_source_suffix;
+	uint32_t high_speed_rollback_target_slot = 0;
+	uint32_t high_speed_rollback_source_slot = 0;
+	std::shared_ptr<android::fs_mgr::LpMetadata> high_speed_rollback_table;
+	std::vector<std::string> high_speed_rollback_new_partitions;
 };
 
 extern TWPartitionManager PartitionManager;
