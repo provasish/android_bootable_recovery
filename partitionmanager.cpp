@@ -623,7 +623,12 @@ void TWPartitionManager::Decrypt_Data() {
 #endif
 		}
 		if (Decrypt_Data->Is_FBE) {
-			if (DataManager::GetIntValue(TW_CRYPTO_PWTYPE) == 0) {
+			// Decryption skipped for this ROM's Android version (see
+			// Skip_FBE_Decryption_For_Rom_Sdk): don't try the default password,
+			// whose failure message would suggest a Format Data.
+			if (android::base::GetBoolProperty("twrp.fbe.decrypt_skipped", false)) {
+				LOGINFO("FBE decryption skipped for this ROM; not trying the default password\n");
+			} else if (DataManager::GetIntValue(TW_CRYPTO_PWTYPE) == 0) {
 				if (Decrypt_Device("!") == 0) {
 					gui_msg("decrypt_success=Successfully decrypted with default password.");
 					DataManager::SetValue(TW_IS_ENCRYPTED, 0);
