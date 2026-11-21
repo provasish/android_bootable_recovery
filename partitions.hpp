@@ -170,7 +170,6 @@ public:
 	std::string Get_Backup_FileName();                                        // Get the backup filename for the partition
 	string Get_Backup_Name();                                                 // Get Backup_Name for partition
 	bool Decrypt_FBE_DE();                                                    // If FBE is present, backup exclusions are set up and DE decrypt is attempted
-	static bool Skip_FBE_Decryption_For_Rom_Sdk();                            // True when the installed ROM is newer than TW_SKIP_FBE_DECRYPTION_SDKVERSION allows
 	string Get_Mount_Point();												  // Return Mount_Point or directory the current partition is mounted on
 	bool Get_Super_Status();												  // Returns true if partition is a super volume mounted partitions
 	void Set_Can_Be_Backed_Up(bool val);									  // Update whether the partition can be backed up or not

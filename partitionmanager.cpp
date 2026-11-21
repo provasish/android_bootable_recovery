@@ -607,8 +607,7 @@ void TWPartitionManager::Decrypt_Data() {
 				while (!Decrypt_Data->Mount(false) && --retry_count)
 					usleep(500);
 				if (Decrypt_Data->Mount(false)) {
-					if (!Decrypt_Data->Decrypt_FBE_DE() &&
-					    !android::base::GetBoolProperty("twrp.fbe.decrypt_skipped", false)) {
+					if (!Decrypt_Data->Decrypt_FBE_DE()) {
 						LOGERR("Unable to decrypt FBE device\n");
 					}
 
@@ -623,12 +622,7 @@ void TWPartitionManager::Decrypt_Data() {
 #endif
 		}
 		if (Decrypt_Data->Is_FBE) {
-			// Decryption skipped for this ROM's Android version (see
-			// Skip_FBE_Decryption_For_Rom_Sdk): don't try the default password,
-			// whose failure message would suggest a Format Data.
-			if (android::base::GetBoolProperty("twrp.fbe.decrypt_skipped", false)) {
-				LOGINFO("FBE decryption skipped for this ROM; not trying the default password\n");
-			} else if (DataManager::GetIntValue(TW_CRYPTO_PWTYPE) == 0) {
+			if (DataManager::GetIntValue(TW_CRYPTO_PWTYPE) == 0) {
 				if (Decrypt_Device("!") == 0) {
 					gui_msg("decrypt_success=Successfully decrypted with default password.");
 					DataManager::SetValue(TW_IS_ENCRYPTED, 0);
@@ -2130,14 +2124,6 @@ int TWPartitionManager::Decrypt_Device(string Password, int user_id) {
 #ifdef TW_INCLUDE_FBE
 		if (!Mount_By_Path("/data", true)) // /data has to be mounted for FBE
 			return -1;
-
-		// Also refuse a password from the GUI or an OpenRecoveryScript
-		// "decrypt" command: it would reach the same keys.
-		if (android::base::GetBoolProperty("twrp.fbe.decrypt_skipped", false) ||
-		    TWPartition::Skip_FBE_Decryption_For_Rom_Sdk()) {
-			gui_err("decrypt_skipped_sdk=Decryption is disabled for this Android version; nothing was changed.");
-			return -1;
-		}
 
 		bool user_need_decrypt = false;
 		std::vector<users_struct>::iterator iter;

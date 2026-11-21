@@ -400,10 +400,6 @@ endif
 ifneq ($(TW_HAPTIC_DEFAULT_MS),)
 	LOCAL_CFLAGS += -DTW_HAPTIC_DEFAULT_MS=$(TW_HAPTIC_DEFAULT_MS)
 endif
-# First Android SDK level whose FBE keys this recovery must not touch.
-ifneq ($(TW_SKIP_FBE_DECRYPTION_SDKVERSION),)
-	LOCAL_CFLAGS += -DTW_SKIP_FBE_DECRYPTION_SDKVERSION=$(TW_SKIP_FBE_DECRYPTION_SDKVERSION)
-endif
 # Device defaults: India Standard Time, "Reflash recovery after ROM" on,
 # and no further ZIPs after an A/B ROM install until recovery is rebooted.
 ifeq ($(TW_DEFAULT_TIMEZONE_IST),true)
